@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import "./firebase";  
+import "./firebase";
 import App from "./App";
 import ErrorBoundary from "./ErrorBoundary";
 
