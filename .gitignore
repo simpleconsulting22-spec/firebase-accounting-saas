@@ -1,0 +1,20 @@
+﻿# Node
+node_modules/
+
+# Build
+dist/
+coverage/
+
+# Env
+.env
+.env.*.local
+
+# Firebase
+.firebase/
+firebase-debug.log
+ui-debug.log
+
+# IDE
+.vscode/
+.idea/
+.DS_Store

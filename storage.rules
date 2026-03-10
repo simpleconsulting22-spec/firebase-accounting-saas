@@ -1,0 +1,48 @@
+﻿rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid));
+    }
+
+    function userTenantId() {
+      return userDoc().data.tenantId;
+    }
+
+    function hasOrgAccess(orgId) {
+      return userDoc().data.orgRoles != null && (
+        userDoc().data.orgRoles["*"] != null ||
+        userDoc().data.orgRoles[orgId] != null
+      );
+    }
+
+    function canManageExports(orgId) {
+      return userDoc().data.orgRoles != null && (
+        userDoc().data.orgRoles["*"] != null ||
+        (userDoc().data.orgRoles[orgId] is list
+          && userDoc().data.orgRoles[orgId].hasAny(["admin", "finance"]))
+      );
+    }
+
+    match /receipts/{tenantId}/{organizationId}/{requestId}/{fileId} {
+      allow read, write: if signedIn()
+        && tenantId == userTenantId()
+        && hasOrgAccess(organizationId);
+    }
+
+    match /exports/{tenantId}/{organizationId}/{exportId} {
+      allow read: if signedIn()
+        && tenantId == userTenantId()
+        && canManageExports(organizationId);
+      allow write: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
