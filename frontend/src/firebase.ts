@@ -5,10 +5,10 @@ import { getFunctions } from "firebase/functions";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBSuH6oKLAD0R3jEvyXsvo4LQoyk3ZSSg",
+  apiKey: "AIzaSyBSuH6oKlA4DQR3jEvyXsvo4LQoyk3ZSSg",
   authDomain: "expense-workflow-platform.firebaseapp.com",
   projectId: "expense-workflow-platform",
-  storageBucket: "expense-workflow-platform.appspot.com",
+  storageBucket: "expense-workflow-platform.firebasestorage.app",
   messagingSenderId: "939707730493",
   appId: "1:939707730493:web:a49536ff1212d253443854"
 };
