@@ -3,9 +3,152 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Allow authenticated users to read/write their tenant data
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+    // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function userTenantId() {
+      return userDoc().tenantId;
+    }
+
+    function userOrgRoles() {
+      return userDoc().orgRoles;
+    }
+
+    function hasOrgAccess(orgId) {
+      let roles = userOrgRoles();
+      return orgId in roles || '*' in roles;
+    }
+
+    function hasRole(orgId, role) {
+      let roles = userOrgRoles();
+      let orgRoles = orgId in roles ? roles[orgId] : (
+        '*' in roles ? roles['*'] : []
+      );
+      return role in orgRoles || 'admin' in orgRoles;
+    }
+
+    function belongsToUserTenant(data) {
+      return data.tenantId == userTenantId();
+    }
+
+    function belongsToUserOrg(data) {
+      return belongsToUserTenant(data) && hasOrgAccess(data.organizationId);
+    }
+
+    // ─── Users ────────────────────────────────────────────────────────────────
+    // Users can only read their own profile; writes are admin-only via Cloud Functions.
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow write: if false;
+    }
+
+    // ─── Tenants ──────────────────────────────────────────────────────────────
+
+    match /tenants/{tenantId} {
+      allow read: if isAuthenticated() && userTenantId() == tenantId;
+      allow write: if false;
+    }
+
+    // ─── Organizations ────────────────────────────────────────────────────────
+
+    match /organizations/{orgId} {
+      allow read: if isAuthenticated() && hasOrgAccess(orgId);
+      allow write: if false;
+    }
+
+    // ─── Funds ────────────────────────────────────────────────────────────────
+
+    match /funds/{fundId} {
+      allow read: if isAuthenticated()
+        && resource.data.tenantId == userTenantId()
+        && hasOrgAccess(resource.data.organizationId);
+      allow write: if false;
+    }
+
+    // ─── Purchase Requests ────────────────────────────────────────────────────
+    // All mutations go through Cloud Functions; clients get read access only.
+
+    match /purchaseRequests/{requestId} {
+      allow read: if isAuthenticated() && belongsToUserOrg(resource.data);
+      allow write: if false;
+    }
+
+    // ─── Expense Reports ──────────────────────────────────────────────────────
+
+    match /expenseReports/{reportId} {
+      allow read: if isAuthenticated() && belongsToUserOrg(resource.data);
+      allow write: if false;
+    }
+
+    // ─── Expense Line Items ───────────────────────────────────────────────────
+
+    match /expenseLineItems/{lineItemId} {
+      allow read: if isAuthenticated() && belongsToUserOrg(resource.data);
+      allow write: if false;
+    }
+
+    // ─── Approvals ────────────────────────────────────────────────────────────
+
+    match /approvals/{approvalId} {
+      allow read: if isAuthenticated() && belongsToUserOrg(resource.data);
+      allow write: if false;
+    }
+
+    // ─── Vendors ──────────────────────────────────────────────────────────────
+
+    match /vendors/{vendorId} {
+      allow read: if isAuthenticated() && resource.data.tenantId == userTenantId();
+      allow write: if false;
+    }
+
+    // ─── Categories ───────────────────────────────────────────────────────────
+
+    match /categories/{categoryId} {
+      allow read: if isAuthenticated() && resource.data.tenantId == userTenantId();
+      allow write: if false;
+    }
+
+    // ─── Chart of Accounts ────────────────────────────────────────────────────
+
+    match /chartOfAccounts/{accountId} {
+      allow read: if isAuthenticated() && belongsToUserOrg(resource.data);
+      allow write: if false;
+    }
+
+    // ─── Journal Entries ──────────────────────────────────────────────────────
+
+    match /journalEntries/{entryId} {
+      allow read: if isAuthenticated() && belongsToUserOrg(resource.data);
+      allow write: if false;
+    }
+
+    // ─── Accounting Exports ───────────────────────────────────────────────────
+
+    match /accountingExports/{exportId} {
+      allow read: if isAuthenticated() && belongsToUserOrg(resource.data);
+      allow write: if false;
+    }
+
+    // ─── Mail Queue (Trigger Email extension) ─────────────────────────────────
+    // Only Cloud Functions (admin SDK) write here; no client access.
+
+    match /mail/{mailId} {
+      allow read, write: if false;
+    }
+
+    // ─── Audit Logs ───────────────────────────────────────────────────────────
+
+    match /auditLogs/{logId} {
+      allow read: if isAuthenticated() && resource.data.tenantId == userTenantId();
+      allow write: if false;
     }
 
   }

@@ -41,7 +41,7 @@ export interface BudgetSnapshotPayload extends TenantOrgPayload {
 }
 
 export type PurchaseRequestApprovalAction = "APPROVE" | "REJECT" | "REQUEST_REVISIONS";
-export type ExpenseReportApprovalAction = "SUBMIT" | "APPROVE" | "REJECT" | "REQUEST_REVISIONS" | "MARK_PAID";
+export type ExpenseReportApprovalAction = "SUBMIT" | "APPROVE" | "REJECT" | "REQUEST_REVISIONS" | "MARK_PAY";
 
 export interface PurchaseRequestApprovalPayload extends TenantOrgPayload {
   requestId: string;

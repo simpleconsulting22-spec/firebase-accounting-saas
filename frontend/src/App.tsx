@@ -1,42 +1,50 @@
-import React from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-
-import Sidebar from "./components/Sidebar";
-
-import Dashboard from "./pages/Dashboard";
-import Expenses from "./pages/Expenses";
-import Vendors from "./pages/Vendors";
-import Categories from "./pages/Categories";
-import ChartOfAccounts from "./pages/ChartOfAccounts";
-import JournalEntries from "./pages/JournalEntries";
-import GeneralLedger from "./pages/GeneralLedger";
-import Export from "./pages/Export";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { onAuthStateChanged, User } from "firebase/auth";
+import { auth } from "./firebase";
+import LoginPage from "./LoginPage";
+import AppLayout from "./layouts/AppLayout";
+import { UserProvider } from "./contexts/UserContext";
 
 export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    return onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "sans-serif" }}>
+        Loading...
+      </div>
+    );
+  }
+
   return (
     <BrowserRouter>
-      <div style={{ display: "flex" }}>
-        
-        <Sidebar />
-
-        <div style={{ flex: 1, padding: "30px" }}>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-
-            <Route path="/expenses" element={<Expenses />} />
-            <Route path="/vendors" element={<Vendors />} />
-            <Route path="/categories" element={<Categories />} />
-
-            <Route path="/chart-of-accounts" element={<ChartOfAccounts />} />
-            <Route path="/journal-entries" element={<JournalEntries />} />
-            <Route path="/general-ledger" element={<GeneralLedger />} />
-
-            <Route path="/export" element={<Export />} />
-          </Routes>
-        </div>
-
-      </div>
+      <Routes>
+        <Route
+          path="/login"
+          element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />}
+        />
+        <Route
+          path="/*"
+          element={
+            user ? (
+              <UserProvider uid={user.uid} email={user.email ?? ""}>
+                <AppLayout />
+              </UserProvider>
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+      </Routes>
     </BrowserRouter>
   );
 }

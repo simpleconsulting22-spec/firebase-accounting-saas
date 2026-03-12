@@ -7,3 +7,4 @@ export * from "./createExpenseReport";
 export * from "./addExpenseLineItem";
 export * from "./applyExpenseReportApprovalAction";
 export * from "./getPurchaseRequestDetail";
+export * from "./onStatusChange";

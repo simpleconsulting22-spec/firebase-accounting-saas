@@ -23,3 +23,4 @@ __exportStar(require("./createExpenseReport"), exports);
 __exportStar(require("./addExpenseLineItem"), exports);
 __exportStar(require("./applyExpenseReportApprovalAction"), exports);
 __exportStar(require("./getPurchaseRequestDetail"), exports);
+__exportStar(require("./onStatusChange"), exports);
