@@ -29,6 +29,7 @@
     "singleProjectMode": true
   },
   "hosting": {
+    "site": "expense-workflow-platform",
     "public": "frontend/dist",
     "ignore": [
       "firebase.json",
