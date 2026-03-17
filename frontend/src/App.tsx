@@ -4,6 +4,8 @@ import { onAuthStateChanged, User } from "firebase/auth";
 import { auth } from "./firebase";
 import LoginPage from "./LoginPage";
 import AppLayout from "./layouts/AppLayout";
+import TokenReviewPage from "./pages/TokenReviewPage";
+import VendorIntakePage from "./pages/VendorIntakePage";
 import { UserProvider } from "./contexts/UserContext";
 
 export default function App() {
@@ -19,8 +21,8 @@ export default function App() {
 
   if (loading) {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "sans-serif" }}>
-        Loading...
+      <div className="flex items-center justify-center h-screen">
+        <span className="loading loading-spinner loading-lg" />
       </div>
     );
   }
@@ -28,9 +30,15 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* Public: token review page — works without login */}
+        <Route path="/review" element={<TokenReviewPage />} />
+
+        {/* Public: vendor intake form — works without login */}
+        <Route path="/vendor-intake" element={<VendorIntakePage />} />
+
         <Route
           path="/login"
-          element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />}
+          element={user ? <Navigate to="/" replace /> : <LoginPage />}
         />
         <Route
           path="/*"

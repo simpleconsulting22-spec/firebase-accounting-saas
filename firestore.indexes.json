@@ -1,171 +1,195 @@
-﻿{
+{
   "indexes": [
     {
-      "collectionGroup": "purchaseRequests",
+      "collectionGroup": "requests",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "organizationId", "order": "ASCENDING" },
-        { "fieldPath": "fundId", "order": "ASCENDING" },
+        { "fieldPath": "orgId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
     {
-      "collectionGroup": "expenseLineItems",
+      "collectionGroup": "requests",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "organizationId", "order": "ASCENDING" },
-        { "fieldPath": "requestId", "order": "ASCENDING" },
-        { "fieldPath": "expenseDate", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "expenseLineItems",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "organizationId", "order": "ASCENDING" },
-        { "fieldPath": "expenseDate", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "expenseLineItems",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "organizationId", "order": "ASCENDING" },
-        { "fieldPath": "requestId", "order": "ASCENDING" },
-        { "fieldPath": "expenseDate", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "expenseReports",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "organizationId", "order": "ASCENDING" },
-        { "fieldPath": "requestId", "order": "ASCENDING" },
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "requestorId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
     {
-      "collectionGroup": "approvals",
+      "collectionGroup": "requests",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "organizationId", "order": "ASCENDING" },
-        { "fieldPath": "requestId", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "ASCENDING" }
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "approverId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
     {
-      "collectionGroup": "vendors",
+      "collectionGroup": "requests",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "vendorGroupId", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "vendors",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "vendorGroupId", "order": "ASCENDING" },
-        { "fieldPath": "active", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "categories",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "categoryGroupId", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "categories",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "categoryGroupId", "order": "ASCENDING" },
-        { "fieldPath": "active", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "accountingExports",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "organizationId", "order": "ASCENDING" },
-        { "fieldPath": "generatedAt", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "chartOfAccounts",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "organizationId", "order": "ASCENDING" },
-        { "fieldPath": "active", "order": "ASCENDING" },
-        { "fieldPath": "accountNumber", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "chartOfAccounts",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "organizationId", "order": "ASCENDING" },
-        { "fieldPath": "accountNumber", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "chartOfAccounts",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "organizationId", "order": "ASCENDING" },
-        { "fieldPath": "accountName", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "journalEntries",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "organizationId", "order": "ASCENDING" },
-        { "fieldPath": "date", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "journalEntries",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "organizationId", "order": "ASCENDING" },
+        { "fieldPath": "orgId", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "date", "order": "DESCENDING" }
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
     {
-      "collectionGroup": "journalEntries",
+      "collectionGroup": "requests",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "organizationId", "order": "ASCENDING" },
-        { "fieldPath": "sourceModule", "order": "ASCENDING" },
-        { "fieldPath": "sourceId", "order": "ASCENDING" }
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "approverId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
     {
-      "collectionGroup": "expenseLineItems",
+      "collectionGroup": "requests",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "tenantId", "order": "ASCENDING" },
-        { "fieldPath": "organizationId", "order": "ASCENDING" },
-        { "fieldPath": "reportId", "order": "ASCENDING" }
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "requestedExpenseDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "lineItems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "requestId", "order": "ASCENDING" },
+        { "fieldPath": "orgId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "lineItems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "receiptDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "files",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "requestId", "order": "ASCENDING" },
+        { "fieldPath": "orgId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "files",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "requestId", "order": "ASCENDING" },
+        { "fieldPath": "lineItemId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tokens",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "token", "order": "ASCENDING" },
+        { "fieldPath": "used", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tokens",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "requestId", "order": "ASCENDING" },
+        { "fieldPath": "type", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "adminDepts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "ministryDepartment", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "categories",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "categoryName", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "vendors",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "vendorName", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "categoryBudgets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "year", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "categoryBudgets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "year", "order": "ASCENDING" },
+        { "fieldPath": "ministryDepartment", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "escalationRules",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "step", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "qbPaymentAccounts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "vendorSetupRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "vendorSetupRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "requestorId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "vendorIntakes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "vendorSetupRequestId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
       ]
     }
   ],

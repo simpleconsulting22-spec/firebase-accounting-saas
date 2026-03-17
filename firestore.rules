@@ -9,12 +9,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function userDoc() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    function uid() {
+      return request.auth.uid;
     }
 
-    function userTenantId() {
-      return userDoc().tenantId;
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
     function userOrgRoles() {
@@ -28,126 +28,197 @@ service cloud.firestore {
 
     function hasRole(orgId, role) {
       let roles = userOrgRoles();
-      let orgRoles = orgId in roles ? roles[orgId] : (
-        '*' in roles ? roles['*'] : []
-      );
-      return role in orgRoles || 'admin' in orgRoles;
+      let orgRoles = orgId in roles ? roles[orgId] : ('*' in roles ? roles['*'] : []);
+      return role in orgRoles || 'ADMIN' in orgRoles || 'admin' in orgRoles;
     }
 
-    function belongsToUserTenant(data) {
-      return data.tenantId == userTenantId();
-    }
-
-    function belongsToUserOrg(data) {
-      return belongsToUserTenant(data) && hasOrgAccess(data.organizationId);
+    function isAdmin(orgId) {
+      return hasRole(orgId, 'ADMIN');
     }
 
     // ─── Users ────────────────────────────────────────────────────────────────
-    // Users can only read their own profile; writes are admin-only via Cloud Functions.
 
     match /users/{userId} {
-      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow read: if isAuthenticated();
       allow write: if false;
     }
 
-    // ─── Tenants ──────────────────────────────────────────────────────────────
+    // ─── Requests (workflow) ──────────────────────────────────────────────────
+    // All mutations go through Cloud Functions; clients get read access if they
+    // belong to the org (requestor, approver, or finance role).
 
-    match /tenants/{tenantId} {
-      allow read: if isAuthenticated() && userTenantId() == tenantId;
+    match /requests/{requestId} {
+      allow read: if isAuthenticated() && hasOrgAccess(resource.data.orgId);
       allow write: if false;
     }
 
-    // ─── Organizations ────────────────────────────────────────────────────────
+    // ─── Line Items ───────────────────────────────────────────────────────────
 
-    match /organizations/{orgId} {
-      allow read: if isAuthenticated() && hasOrgAccess(orgId);
+    match /lineItems/{lineItemId} {
+      allow read: if isAuthenticated() && hasOrgAccess(resource.data.orgId);
       allow write: if false;
     }
 
-    // ─── Funds ────────────────────────────────────────────────────────────────
+    // ─── Files ────────────────────────────────────────────────────────────────
 
-    match /funds/{fundId} {
-      allow read: if isAuthenticated()
-        && resource.data.tenantId == userTenantId()
-        && hasOrgAccess(resource.data.organizationId);
+    match /files/{fileId} {
+      allow read: if isAuthenticated() && hasOrgAccess(resource.data.orgId);
       allow write: if false;
     }
 
-    // ─── Purchase Requests ────────────────────────────────────────────────────
-    // All mutations go through Cloud Functions; clients get read access only.
+    // ─── Tokens ───────────────────────────────────────────────────────────────
+    // Readable without auth so unauthenticated approvers can validate their token.
+    // Write only via Cloud Functions.
 
-    match /purchaseRequests/{requestId} {
-      allow read: if isAuthenticated() && belongsToUserOrg(resource.data);
+    match /tokens/{tokenId} {
+      allow read: if true;
       allow write: if false;
     }
 
-    // ─── Expense Reports ──────────────────────────────────────────────────────
+    // ─── Admin Departments ────────────────────────────────────────────────────
 
-    match /expenseReports/{reportId} {
-      allow read: if isAuthenticated() && belongsToUserOrg(resource.data);
+    match /adminDepts/{deptId} {
+      allow read: if isAuthenticated() && (hasOrgAccess(resource.data.organizationId) || hasOrgAccess(resource.data.orgId));
       allow write: if false;
     }
 
-    // ─── Expense Line Items ───────────────────────────────────────────────────
+    // ─── Escalation Rules ─────────────────────────────────────────────────────
 
-    match /expenseLineItems/{lineItemId} {
-      allow read: if isAuthenticated() && belongsToUserOrg(resource.data);
+    match /escalationRules/{ruleId} {
+      allow read: if isAuthenticated() && hasOrgAccess(resource.data.orgId);
       allow write: if false;
     }
 
-    // ─── Approvals ────────────────────────────────────────────────────────────
+    // ─── Counters ─────────────────────────────────────────────────────────────
 
-    match /approvals/{approvalId} {
-      allow read: if isAuthenticated() && belongsToUserOrg(resource.data);
+    match /counters/{counterId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    // ─── QB Payment Accounts ─────────────────────────────────────────────────
+
+    match /qbPaymentAccounts/{accountId} {
+      allow read: if isAuthenticated() && hasOrgAccess(resource.data.orgId);
       allow write: if false;
     }
 
     // ─── Vendors ──────────────────────────────────────────────────────────────
 
     match /vendors/{vendorId} {
-      allow read: if isAuthenticated() && resource.data.tenantId == userTenantId();
+      allow read: if isAuthenticated() && hasOrgAccess(resource.data.orgId);
       allow write: if false;
     }
 
-    // ─── Categories ───────────────────────────────────────────────────────────
+    // ─── Vendor Setup Requests ────────────────────────────────────────────────
 
-    match /categories/{categoryId} {
-      allow read: if isAuthenticated() && resource.data.tenantId == userTenantId();
+    match /vendorSetupRequests/{requestId} {
+      allow read: if isAuthenticated() && hasOrgAccess(resource.data.orgId);
       allow write: if false;
     }
 
-    // ─── Chart of Accounts ────────────────────────────────────────────────────
+    // ─── Vendor Intakes ───────────────────────────────────────────────────────
+    // Publicly readable so vendor can load their intake form via token link.
 
-    match /chartOfAccounts/{accountId} {
-      allow read: if isAuthenticated() && belongsToUserOrg(resource.data);
+    match /vendorIntakes/{intakeId} {
+      allow read: if true;
       allow write: if false;
     }
 
-    // ─── Journal Entries ──────────────────────────────────────────────────────
+    // ─── Org Roles ────────────────────────────────────────────────────────────
 
-    match /journalEntries/{entryId} {
-      allow read: if isAuthenticated() && belongsToUserOrg(resource.data);
+    match /orgRoles/{roleId} {
+      allow read: if isAuthenticated() && hasOrgAccess(resource.data.orgId);
       allow write: if false;
     }
 
-    // ─── Accounting Exports ───────────────────────────────────────────────────
+    // ─── Budgets ──────────────────────────────────────────────────────────────
 
-    match /accountingExports/{exportId} {
-      allow read: if isAuthenticated() && belongsToUserOrg(resource.data);
+    match /budgets/{budgetId} {
+      allow read: if isAuthenticated() && hasOrgAccess(resource.data.orgId);
       allow write: if false;
     }
 
     // ─── Mail Queue (Trigger Email extension) ─────────────────────────────────
-    // Only Cloud Functions (admin SDK) write here; no client access.
 
     match /mail/{mailId} {
       allow read, write: if false;
     }
 
-    // ─── Audit Logs ───────────────────────────────────────────────────────────
+    // ─── Legacy collections (existing SaaS scaffold) ──────────────────────────
+
+    match /tenants/{tenantId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    match /organizations/{orgId} {
+      allow read: if isAuthenticated() && hasOrgAccess(orgId);
+      allow write: if false;
+    }
+
+    match /purchaseRequests/{requestId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    match /expenseReports/{reportId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    match /expenseLineItems/{lineItemId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    match /approvals/{approvalId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
 
     match /auditLogs/{logId} {
-      allow read: if isAuthenticated() && resource.data.tenantId == userTenantId();
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    match /accountingExports/{exportId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    match /chartOfAccounts/{accountId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    match /journalEntries/{entryId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    match /funds/{fundId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    match /categories/{categoryId} {
+      allow read: if isAuthenticated() && hasOrgAccess(resource.data.orgId);
+      allow write: if false;
+    }
+
+    match /categoryBudgets/{id} {
+      allow read: if isAuthenticated() && (hasOrgAccess(resource.data.organizationId) || hasOrgAccess(resource.data.orgId));
+      allow write: if false;
+    }
+
+    match /workflowSettings/{id} {
+      allow read: if isAuthenticated() && hasOrgAccess(resource.data.orgId);
+      allow write: if false;
+    }
+
+    match /adminAuditLogs/{id} {
+      allow read: if isAuthenticated();
       allow write: if false;
     }
 

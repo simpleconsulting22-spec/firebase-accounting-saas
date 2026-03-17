@@ -4,11 +4,12 @@ import { auth } from "../firebase";
 import { useUserContext } from "../contexts/UserContext";
 import Sidebar from "../components/Sidebar";
 import Dashboard from "../pages/Dashboard";
-import RequestsListPage from "../pages/RequestsListPage";
 import CreateRequestPage from "../pages/CreateRequestPage";
 import RequestDetailPage from "../pages/RequestDetailPage";
+import ExpenseReportPage from "../pages/ExpenseReportPage";
+import AdminPage from "../pages/AdminPage";
+import VendorPage from "../pages/VendorPage";
 import Expenses from "../pages/Expenses";
-import Vendors from "../pages/Vendors";
 import Categories from "../pages/Categories";
 import ChartOfAccounts from "../pages/ChartOfAccounts";
 import JournalEntries from "../pages/JournalEntries";
@@ -20,19 +21,19 @@ export default function AppLayout() {
 
   if (loading) {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "sans-serif" }}>
-        Loading profile...
+      <div className="flex items-center justify-center h-screen">
+        <span className="loading loading-spinner loading-lg" />
       </div>
     );
   }
 
   if (error || !profile) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", gap: 16, fontFamily: "sans-serif" }}>
-        <p style={{ color: "#dc2626", fontSize: 16 }}>{error || "Profile not found."}</p>
+      <div className="flex flex-col items-center justify-center h-screen gap-4">
+        <p className="text-error text-base">{error || "Profile not found."}</p>
         <button
           onClick={() => signOut(auth)}
-          style={{ padding: "8px 20px", background: "#374151", color: "white", border: "none", borderRadius: 6, cursor: "pointer" }}
+          className="btn btn-neutral btn-sm"
         >
           Sign Out
         </button>
@@ -41,23 +42,33 @@ export default function AppLayout() {
   }
 
   return (
-    <div style={{ display: "flex", height: "100vh", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div className="flex h-screen font-sans">
       <Sidebar />
-      <main style={{ flex: 1, overflowY: "auto", background: "#f9fafb" }}>
+      <main className="flex-1 overflow-y-auto bg-base-200">
         <Routes>
-          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route index element={<Dashboard />} />
           <Route path="dashboard" element={<Dashboard />} />
-          <Route path="requests" element={<RequestsListPage />} />
+
+          {/* Workflow routes */}
           <Route path="requests/new" element={<CreateRequestPage />} />
+          <Route path="requests/:id/edit" element={<CreateRequestPage />} />
+          <Route path="requests/:id/expense" element={<ExpenseReportPage />} />
           <Route path="requests/:id" element={<RequestDetailPage />} />
+          <Route path="requests" element={<Dashboard />} />
+
+          {/* Admin and vendor */}
+          <Route path="admin" element={<AdminPage />} />
+          <Route path="vendors" element={<VendorPage />} />
+
+          {/* Legacy/other pages */}
           <Route path="expenses" element={<Expenses />} />
-          <Route path="vendors" element={<Vendors />} />
           <Route path="categories" element={<Categories />} />
           <Route path="chart-of-accounts" element={<ChartOfAccounts />} />
           <Route path="journal-entries" element={<JournalEntries />} />
           <Route path="general-ledger" element={<GeneralLedger />} />
           <Route path="export" element={<Export />} />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
     </div>

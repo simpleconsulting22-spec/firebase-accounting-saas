@@ -1,78 +1,76 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useEffect, useState } from "react";
-import { collection, query, where, getDocs, orderBy, limit } from "firebase/firestore";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { db } from "../firebase";
 import { useUserContext } from "../contexts/UserContext";
-const STATUS_COLORS = {
-    DRAFT: "#f59e0b",
-    AWAITING_PREAPPROVAL: "#3b82f6",
-    REQUEST_REVISIONS_NEEDED: "#f97316",
-    APPROVE: "#10b981",
-    REJECT: "#ef4444",
-    EXPENSE_DRAFT: "#8b5cf6",
-    AWAITING_FINANCE_REVIEW: "#3b82f6",
-    EXPENSE_APPROVE: "#10b981",
-    MARK_PAY: "#6b7280",
+import { api } from "../workflow/api";
+import { STATUS_LABELS, STATUS_BADGE_CLASS } from "../workflow/constants";
+const fmtCurrency = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
+const fmtDate = (val) => {
+    if (!val)
+        return "—";
+    if (typeof val === "object" && val.seconds) {
+        return new Date(val.seconds * 1000).toLocaleDateString('en-US');
+    }
+    try {
+        return new Date(val).toLocaleDateString('en-US');
+    }
+    catch {
+        return String(val);
+    }
 };
-const STATUS_LABELS = {
-    DRAFT: "Draft",
-    AWAITING_PREAPPROVAL: "Awaiting Approval",
-    REQUEST_REVISIONS_NEEDED: "Revisions Needed",
-    APPROVE: "Pre-Approved",
-    REJECT: "Rejected",
-    EXPENSE_DRAFT: "Expense Draft",
-    AWAITING_FINANCE_REVIEW: "Finance Review",
-    EXPENSE_APPROVE: "Expense Approved",
-    MARK_PAY: "Paid",
-};
+export function StatusBadge({ status }) {
+    const label = STATUS_LABELS[status] || status;
+    const cls = STATUS_BADGE_CLASS[status] || 'badge-ghost';
+    return _jsx("span", { className: `badge ${cls} badge-sm`, children: label });
+}
+function RequestsTable({ requests, emptyMsg }) {
+    if (requests.length === 0) {
+        return _jsx("div", { className: "py-10 text-center text-base-content/50 text-sm", children: emptyMsg });
+    }
+    return (_jsx("div", { className: "overflow-x-auto", children: _jsxs("table", { className: "table table-sm", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "ID" }), _jsx("th", { children: "Dept" }), _jsx("th", { children: "Vendor" }), _jsx("th", { children: "Amount" }), _jsx("th", { children: "Status" }), _jsx("th", { children: "Date" }), _jsx("th", {})] }) }), _jsx("tbody", { children: requests.map((r) => (_jsxs("tr", { className: "hover", children: [_jsxs("td", { className: "font-mono text-xs text-base-content/60", children: [r.id.slice(0, 8), "\u2026"] }), _jsx("td", { className: "text-sm", children: r.ministryDepartment || "—" }), _jsx("td", { className: "text-sm", children: r.vendorName || "—" }), _jsx("td", { className: "text-sm font-medium", children: fmtCurrency(r.estimatedAmount || 0) }), _jsx("td", { children: _jsx(StatusBadge, { status: r.status }) }), _jsx("td", { className: "text-xs text-base-content/60", children: fmtDate(r.createdAt) }), _jsx("td", { children: _jsx(Link, { to: `/requests/${r.id}`, className: "btn btn-xs btn-outline", children: "View" }) })] }, r.id))) })] }) }));
+}
+function SkeletonTable() {
+    return (_jsx("div", { className: "space-y-2 p-4", children: [1, 2, 3].map(i => (_jsx("div", { className: "skeleton h-8 w-full rounded" }, i))) }));
+}
 export default function Dashboard() {
-    const { profile, activeOrgId, canApprove, canFinanceReview } = useUserContext();
-    const [counts, setCounts] = useState({ myDrafts: 0, awaitingApproval: 0, awaitingFinance: 0, revisionsNeeded: 0 });
-    const [recent, setRecent] = useState([]);
+    const { profile, activeOrgId, activeOrgName, isAdmin, canApprove, isFinancePayor, isReceiptsReviewer, isQBEntry } = useUserContext();
+    const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
-    useEffect(() => {
+    const [error, setError] = useState("");
+    const [tab, setTab] = useState("my");
+    const load = useCallback(async () => {
         if (!profile || !activeOrgId)
             return;
-        const { tenantId, uid } = profile;
-        const base = [
-            where("tenantId", "==", tenantId),
-            where("organizationId", "==", activeOrgId),
-        ];
         setLoading(true);
-        Promise.all([
-            getDocs(query(collection(db, "purchaseRequests"), ...base, where("requestorId", "==", uid), where("status", "in", ["DRAFT", "REQUEST_REVISIONS_NEEDED"]))),
-            getDocs(query(collection(db, "purchaseRequests"), ...base, where("status", "==", "AWAITING_PREAPPROVAL"))),
-            getDocs(query(collection(db, "purchaseRequests"), ...base, where("status", "==", "AWAITING_FINANCE_REVIEW"))),
-            getDocs(query(collection(db, "purchaseRequests"), ...base, where("requestorId", "==", uid), where("status", "==", "REQUEST_REVISIONS_NEEDED"))),
-            getDocs(query(collection(db, "purchaseRequests"), ...base, orderBy("createdAt", "desc"), limit(6))),
-        ]).then(([draftsSnap, awaitApprSnap, awaitFinSnap, revSnap, recentSnap]) => {
-            setCounts({
-                myDrafts: draftsSnap.size,
-                awaitingApproval: awaitApprSnap.size,
-                awaitingFinance: awaitFinSnap.size,
-                revisionsNeeded: revSnap.size,
-            });
-            setRecent(recentSnap.docs.map((d) => ({
-                id: d.id,
-                purpose: String(d.data().purpose || ""),
-                status: String(d.data().status || ""),
-                estimatedAmount: Number(d.data().estimatedAmount || 0),
-            })));
-        }).catch(console.error).finally(() => setLoading(false));
+        setError("");
+        try {
+            const result = await api.getMyDashboards({ orgId: activeOrgId });
+            setData(result);
+        }
+        catch (err) {
+            setError(err instanceof Error ? err.message : "Failed to load dashboard.");
+        }
+        finally {
+            setLoading(false);
+        }
     }, [profile, activeOrgId]);
-    if (!profile)
-        return null;
-    const cards = [
-        { label: "My Drafts", count: counts.myDrafts, color: "#f59e0b", link: "/requests?status=DRAFT&mine=true", show: true },
-        { label: "Revisions Needed", count: counts.revisionsNeeded, color: "#f97316", link: "/requests?status=REQUEST_REVISIONS_NEEDED&mine=true", show: true },
-        { label: "Awaiting Approval", count: counts.awaitingApproval, color: "#3b82f6", link: "/requests?status=AWAITING_PREAPPROVAL", show: canApprove },
-        { label: "Awaiting Finance", count: counts.awaitingFinance, color: "#8b5cf6", link: "/requests?status=AWAITING_FINANCE_REVIEW", show: canFinanceReview },
-    ].filter((c) => c.show);
-    return (_jsxs("div", { style: { padding: 24 }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }, children: [_jsxs("div", { children: [_jsx("h1", { style: { margin: 0, fontSize: 22, fontWeight: 700, color: "#111827" }, children: "Dashboard" }), _jsx("p", { style: { margin: "4px 0 0", color: "#6b7280", fontSize: 13 }, children: activeOrgId })] }), _jsx(Link, { to: "/requests/new", style: { padding: "9px 18px", background: "#2563eb", color: "white", borderRadius: 8, textDecoration: "none", fontWeight: 600, fontSize: 13 }, children: "+ New Request" })] }), loading ? (_jsx("div", { style: { color: "#9ca3af", fontSize: 14 }, children: "Loading..." })) : (_jsxs(_Fragment, { children: [_jsx("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14, marginBottom: 28 }, children: cards.map((c) => (_jsx(Link, { to: c.link, style: { textDecoration: "none" }, children: _jsxs("div", { style: { background: "white", borderRadius: 10, padding: "18px 20px", boxShadow: "0 1px 3px rgba(0,0,0,0.07)", borderLeft: `4px solid ${c.color}` }, children: [_jsx("div", { style: { fontSize: 30, fontWeight: 700, color: c.color, lineHeight: 1 }, children: c.count }), _jsx("div", { style: { fontSize: 12, color: "#6b7280", marginTop: 6 }, children: c.label })] }) }, c.label))) }), _jsxs("div", { style: { background: "white", borderRadius: 10, boxShadow: "0 1px 3px rgba(0,0,0,0.07)", overflow: "hidden" }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: "1px solid #f3f4f6" }, children: [_jsx("h2", { style: { margin: 0, fontSize: 15, fontWeight: 600, color: "#111827" }, children: "Recent Requests" }), _jsx(Link, { to: "/requests", style: { fontSize: 12, color: "#2563eb", textDecoration: "none" }, children: "View all \u2192" })] }), recent.length === 0 ? (_jsxs("div", { style: { padding: 32, textAlign: "center", color: "#9ca3af", fontSize: 14 }, children: ["No requests yet.", " ", _jsx(Link, { to: "/requests/new", style: { color: "#2563eb" }, children: "Create your first request \u2192" })] })) : (_jsxs("table", { style: { width: "100%", borderCollapse: "collapse" }, children: [_jsx("thead", { children: _jsx("tr", { children: ["Purpose", "Amount", "Status", ""].map((h) => (_jsx("th", { style: { textAlign: "left", fontSize: 11, color: "#9ca3af", fontWeight: 600, padding: "10px 16px", borderBottom: "1px solid #f3f4f6", textTransform: "uppercase", letterSpacing: "0.05em" }, children: h }, h))) }) }), _jsx("tbody", { children: recent.map((r) => (_jsxs("tr", { style: { borderBottom: "1px solid #f9fafb" }, children: [_jsx("td", { style: { padding: "12px 16px", fontSize: 14, color: "#111827" }, children: r.purpose || "(no purpose)" }), _jsxs("td", { style: { padding: "12px 16px", fontSize: 14, color: "#374151", whiteSpace: "nowrap" }, children: ["$", r.estimatedAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })] }), _jsx("td", { style: { padding: "12px 16px" }, children: _jsx(StatusBadge, { status: r.status }) }), _jsx("td", { style: { padding: "12px 16px", textAlign: "right" }, children: _jsx(Link, { to: `/requests/${r.id}`, style: { fontSize: 12, color: "#2563eb", textDecoration: "none", fontWeight: 500 }, children: "View \u2192" }) })] }, r.id))) })] }))] })] }))] }));
-}
-export function StatusBadge({ status }) {
-    const color = STATUS_COLORS[status] || "#6b7280";
-    const label = STATUS_LABELS[status] || status;
-    return (_jsx("span", { style: { fontSize: 11, padding: "3px 10px", borderRadius: 999, background: color + "20", color, fontWeight: 600, whiteSpace: "nowrap" }, children: label }));
+    useEffect(() => { load(); }, [load]);
+    const showApprovals = isAdmin || canApprove;
+    const showFinance = isAdmin || isFinancePayor || isReceiptsReviewer || isQBEntry;
+    const financeQueue = (() => {
+        if (!data)
+            return [];
+        const queue = data.financeQueue || [];
+        if (isAdmin)
+            return queue;
+        const allowed = [];
+        if (isReceiptsReviewer)
+            allowed.push("SUBMITTED_RECEIPT_REVIEW", "EXCEEDS_APPROVED_AMOUNT");
+        if (isFinancePayor)
+            allowed.push("FINAL_APPROVED");
+        if (isQBEntry)
+            allowed.push("PAID", "QB_SENT");
+        return queue.filter(r => allowed.includes(r.status));
+    })();
+    return (_jsxs("div", { className: "p-6 max-w-6xl mx-auto", children: [_jsxs("div", { className: "flex items-center justify-between mb-6", children: [_jsxs("div", { children: [_jsx("h1", { className: "text-2xl font-bold", children: "Dashboard" }), _jsx("p", { className: "text-sm text-base-content/60 mt-1", children: activeOrgName })] }), _jsx(Link, { to: "/requests/new", className: "btn btn-primary btn-sm", children: "+ New Request" })] }), error && (_jsx("div", { className: "alert alert-error mb-4", children: _jsx("span", { children: error }) })), _jsxs("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-4 mb-6", children: [_jsxs("div", { className: "stat bg-base-100 rounded-box shadow", children: [_jsx("div", { className: "stat-title text-xs", children: "My Requests" }), _jsx("div", { className: "stat-value text-2xl", children: loading ? "—" : (data?.myRequests?.length ?? 0) })] }), showApprovals && (_jsxs("div", { className: "stat bg-base-100 rounded-box shadow", children: [_jsx("div", { className: "stat-title text-xs", children: "Pending Approvals" }), _jsx("div", { className: "stat-value text-2xl text-warning", children: loading ? "—" : (data?.pendingApprovals?.length ?? 0) })] })), showFinance && (_jsxs("div", { className: "stat bg-base-100 rounded-box shadow", children: [_jsx("div", { className: "stat-title text-xs", children: "Finance Queue" }), _jsx("div", { className: "stat-value text-2xl text-info", children: loading ? "—" : financeQueue.length })] }))] }), _jsxs("div", { className: "tabs tabs-boxed mb-4", children: [_jsx("button", { className: `tab ${tab === "my" ? "tab-active" : ""}`, onClick: () => setTab("my"), children: "My Requests" }), showApprovals && (_jsxs("button", { className: `tab ${tab === "approvals" ? "tab-active" : ""}`, onClick: () => setTab("approvals"), children: ["Pending Approvals", (data?.pendingApprovals?.length ?? 0) > 0 && (_jsx("span", { className: "badge badge-warning badge-xs ml-2", children: data.pendingApprovals.length }))] })), showFinance && (_jsxs("button", { className: `tab ${tab === "finance" ? "tab-active" : ""}`, onClick: () => setTab("finance"), children: ["Finance Queue", financeQueue.length > 0 && (_jsx("span", { className: "badge badge-info badge-xs ml-2", children: financeQueue.length }))] }))] }), _jsx("div", { className: "card bg-base-100 shadow", children: _jsx("div", { className: "card-body p-0", children: loading ? (_jsx(SkeletonTable, {})) : (_jsxs(_Fragment, { children: [tab === "my" && (_jsx(RequestsTable, { requests: data?.myRequests ?? [], emptyMsg: "No requests yet. Create your first request!" })), tab === "approvals" && showApprovals && (_jsx("div", { className: "overflow-x-auto", children: (data?.pendingApprovals ?? []).length === 0 ? (_jsx("div", { className: "py-10 text-center text-base-content/50 text-sm", children: "No pending approvals." })) : (_jsxs("table", { className: "table table-sm", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "ID" }), _jsx("th", { children: "Requestor" }), _jsx("th", { children: "Dept" }), _jsx("th", { children: "Vendor" }), _jsx("th", { children: "Amount" }), _jsx("th", { children: "Status" }), _jsx("th", { children: "Date" }), _jsx("th", {})] }) }), _jsx("tbody", { children: (data?.pendingApprovals ?? []).map((r) => (_jsxs("tr", { className: "hover", children: [_jsxs("td", { className: "font-mono text-xs text-base-content/60", children: [r.id.slice(0, 8), "\u2026"] }), _jsx("td", { className: "text-sm", children: r.requestorName || r.requestorEmail || "—" }), _jsx("td", { className: "text-sm", children: r.ministryDepartment || "—" }), _jsx("td", { className: "text-sm", children: r.vendorName || "—" }), _jsx("td", { className: "text-sm font-medium", children: fmtCurrency(r.estimatedAmount || 0) }), _jsx("td", { children: _jsx(StatusBadge, { status: r.status }) }), _jsx("td", { className: "text-xs text-base-content/60", children: fmtDate(r.createdAt) }), _jsx("td", { children: r.preApprovalToken ? (_jsx(Link, { to: `/review?token=${r.preApprovalToken}`, className: "btn btn-xs btn-warning", children: "Review" })) : (_jsx(Link, { to: `/requests/${r.id}`, className: "btn btn-xs btn-outline", children: "View" })) })] }, r.id))) })] })) })), tab === "finance" && showFinance && (_jsx("div", { className: "overflow-x-auto", children: financeQueue.length === 0 ? (_jsx("div", { className: "py-10 text-center text-base-content/50 text-sm", children: "Finance queue is empty." })) : (_jsxs("table", { className: "table table-sm", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "ID" }), _jsx("th", { children: "Requestor" }), _jsx("th", { children: "Vendor" }), _jsx("th", { children: "Amount" }), _jsx("th", { children: "Status" }), _jsx("th", { children: "Dept" }), _jsx("th", { children: "Date" }), _jsx("th", {})] }) }), _jsx("tbody", { children: financeQueue.map((r) => (_jsxs("tr", { className: "hover", children: [_jsxs("td", { className: "font-mono text-xs text-base-content/60", children: [r.id.slice(0, 8), "\u2026"] }), _jsx("td", { className: "text-sm", children: r.requestorName || r.requestorEmail || "—" }), _jsx("td", { className: "text-sm", children: r.vendorName || "—" }), _jsx("td", { className: "text-sm font-medium", children: fmtCurrency(r.actualAmount || r.estimatedAmount || 0) }), _jsx("td", { children: _jsx(StatusBadge, { status: r.status }) }), _jsx("td", { className: "text-sm", children: r.ministryDepartment || "—" }), _jsx("td", { className: "text-xs text-base-content/60", children: fmtDate(r.createdAt) }), _jsx("td", { children: _jsx(Link, { to: `/requests/${r.id}`, className: "btn btn-xs btn-outline", children: "View" }) })] }, r.id))) })] })) }))] })) }) })] }));
 }

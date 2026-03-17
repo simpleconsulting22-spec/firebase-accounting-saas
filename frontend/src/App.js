@@ -5,6 +5,8 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./firebase";
 import LoginPage from "./LoginPage";
 import AppLayout from "./layouts/AppLayout";
+import TokenReviewPage from "./pages/TokenReviewPage";
+import VendorIntakePage from "./pages/VendorIntakePage";
 import { UserProvider } from "./contexts/UserContext";
 export default function App() {
     const [user, setUser] = useState(null);
@@ -16,7 +18,7 @@ export default function App() {
         });
     }, []);
     if (loading) {
-        return (_jsx("div", { style: { display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "sans-serif" }, children: "Loading..." }));
+        return (_jsx("div", { className: "flex items-center justify-center h-screen", children: _jsx("span", { className: "loading loading-spinner loading-lg" }) }));
     }
-    return (_jsx(BrowserRouter, { children: _jsxs(Routes, { children: [_jsx(Route, { path: "/login", element: user ? _jsx(Navigate, { to: "/dashboard", replace: true }) : _jsx(LoginPage, {}) }), _jsx(Route, { path: "/*", element: user ? (_jsx(UserProvider, { uid: user.uid, email: user.email ?? "", children: _jsx(AppLayout, {}) })) : (_jsx(Navigate, { to: "/login", replace: true })) })] }) }));
+    return (_jsx(BrowserRouter, { children: _jsxs(Routes, { children: [_jsx(Route, { path: "/review", element: _jsx(TokenReviewPage, {}) }), _jsx(Route, { path: "/vendor-intake", element: _jsx(VendorIntakePage, {}) }), _jsx(Route, { path: "/login", element: user ? _jsx(Navigate, { to: "/", replace: true }) : _jsx(LoginPage, {}) }), _jsx(Route, { path: "/*", element: user ? (_jsx(UserProvider, { uid: user.uid, email: user.email ?? "", children: _jsx(AppLayout, {}) })) : (_jsx(Navigate, { to: "/login", replace: true })) })] }) }));
 }

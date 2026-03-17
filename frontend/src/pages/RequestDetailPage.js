@@ -1,107 +1,78 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useCallback, useEffect, useState } from "react";
-import { doc, getDoc, collection, query, where, getDocs, orderBy, } from "firebase/firestore";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { db } from "../firebase";
-import { expensesApi } from "../modules/expenses/services";
 import { useUserContext } from "../contexts/UserContext";
-import { StatusBadge } from "./Dashboard";
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+import { api } from "../workflow/api";
+import { STATUS_LABELS, STATUS_BADGE_CLASS } from "../workflow/constants";
+const fmtCurrency = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0);
 const fmtDate = (val) => {
     if (!val)
         return "—";
-    // Firestore Timestamp arrives as { seconds, nanoseconds }
-    if (typeof val === "object" && "seconds" in val) {
-        return new Date(val.seconds * 1000).toLocaleDateString();
+    if (typeof val === "object" && val.seconds) {
+        return new Date(val.seconds * 1000).toLocaleDateString('en-US');
     }
-    return String(val);
+    try {
+        return new Date(val).toLocaleDateString('en-US');
+    }
+    catch {
+        return String(val);
+    }
 };
-const fmtMoney = (n) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const row = (label, value) => (_jsxs("tr", { children: [_jsx("td", { style: { padding: "8px 0", fontSize: 12, color: "#9ca3af", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", width: 160, verticalAlign: "top" }, children: label }), _jsx("td", { style: { padding: "8px 0 8px 16px", fontSize: 14, color: "#111827" }, children: value })] }, label));
-// ─── Main Component ───────────────────────────────────────────────────────────
+function StatusBadge({ status }) {
+    const label = STATUS_LABELS[status] || status;
+    const cls = STATUS_BADGE_CLASS[status] || 'badge-ghost';
+    return _jsx("span", { className: `badge ${cls}`, children: label });
+}
+const STEPS = [
+    { n: 1, label: "Draft" },
+    { n: 2, label: "Pre-Approval" },
+    { n: 3, label: "Pre-Approved" },
+    { n: 4, label: "Expense Report" },
+    { n: 5, label: "Receipt Review" },
+    { n: 6, label: "Final Approved" },
+    { n: 7, label: "Paid" },
+    { n: 8, label: "QB" },
+];
+const STATUS_TO_STEP = {
+    DRAFT: 1,
+    NEEDS_EDITS_STEP1: 1,
+    SUBMITTED_PREAPPROVAL: 2,
+    PREAPPROVED: 3,
+    DRAFT_EXPENSE: 4,
+    NEEDS_EDITS_STEP3: 4,
+    EXCEEDS_APPROVED_AMOUNT: 5,
+    SUBMITTED_RECEIPT_REVIEW: 5,
+    FINAL_APPROVED: 6,
+    PAID: 7,
+    QB_SENT: 8,
+    QB_ENTERED: 8,
+    REJECTED: 1,
+};
 export default function RequestDetailPage() {
     const { id } = useParams();
     const navigate = useNavigate();
-    const { profile, activeOrgId, canApprove, canRequestExpense, canFinanceReview } = useUserContext();
+    const { profile, activeOrgId, isAdmin, isFinancePayor, isQBEntry, isReceiptsReviewer } = useUserContext();
     const [request, setRequest] = useState(null);
-    const [expenseReport, setExpenseReport] = useState(null);
     const [lineItems, setLineItems] = useState([]);
-    const [approvals, setApprovals] = useState([]);
+    const [files, setFiles] = useState([]);
     const [loading, setLoading] = useState(true);
     const [actionBusy, setActionBusy] = useState(false);
     const [actionError, setActionError] = useState("");
     const [actionSuccess, setActionSuccess] = useState("");
-    // Line item form state
-    const [showLineItemForm, setShowLineItemForm] = useState(false);
-    const [liVendorId, setLiVendorId] = useState("");
-    const [liCategoryId, setLiCategoryId] = useState("");
-    const [liAmount, setLiAmount] = useState("");
-    const [liDate, setLiDate] = useState("");
-    const [liDescription, setLiDescription] = useState("");
-    const [liBusy, setLiBusy] = useState(false);
-    const [liError, setLiError] = useState("");
-    // Approval action state
-    const [prAction, setPrAction] = useState("APPROVE");
-    const [erAction, setErAction] = useState("APPROVE");
-    const [comments, setComments] = useState("");
+    // Action form state
+    const [paymentRef, setPaymentRef] = useState("");
+    const [qbNotes, setQbNotes] = useState("");
+    const [overageAmount, setOverageAmount] = useState("");
+    const [adminReceiptsNotes, setAdminReceiptsNotes] = useState("");
     const load = useCallback(async () => {
         if (!id || !profile || !activeOrgId)
             return;
         setLoading(true);
         try {
-            const snap = await getDoc(doc(db, "purchaseRequests", id));
-            if (!snap.exists()) {
-                navigate("/requests");
-                return;
-            }
-            const d = snap.data();
-            setRequest({
-                id: snap.id,
-                purpose: String(d.purpose || ""),
-                description: String(d.description || ""),
-                status: String(d.status || ""),
-                estimatedAmount: Number(d.estimatedAmount || 0),
-                approvedAmount: Number(d.approvedAmount || 0),
-                actualAmount: Number(d.actualAmount || 0),
-                fundId: String(d.fundId || ""),
-                ministryDepartment: String(d.ministryDepartment || ""),
-                requestorId: String(d.requestorId || ""),
-                approverId: String(d.approverId || ""),
-                plannedPaymentMethod: String(d.plannedPaymentMethod || ""),
-                requestedExpenseDate: fmtDate(d.requestedExpenseDate),
-                createdAt: fmtDate(d.createdAt),
-                updatedAt: fmtDate(d.updatedAt),
-            });
-            const base = [
-                where("tenantId", "==", profile.tenantId),
-                where("organizationId", "==", activeOrgId),
-                where("requestId", "==", id),
-            ];
-            const [erSnap, liSnap, appSnap] = await Promise.all([
-                getDocs(query(collection(db, "expenseReports"), ...base, orderBy("createdAt", "desc"))),
-                getDocs(query(collection(db, "expenseLineItems"), ...base, orderBy("expenseDate", "asc"))),
-                getDocs(query(collection(db, "approvals"), ...base, orderBy("createdAt", "asc"))),
-            ]);
-            setExpenseReport(erSnap.empty ? null : {
-                id: erSnap.docs[0].id,
-                status: String(erSnap.docs[0].data().status || ""),
-            });
-            setLineItems(liSnap.docs.map((x) => ({
-                id: x.id,
-                vendorId: String(x.data().vendorId || ""),
-                categoryId: String(x.data().categoryId || ""),
-                amount: Number(x.data().amount || 0),
-                expenseDate: fmtDate(x.data().expenseDate),
-                description: String(x.data().description || ""),
-            })));
-            setApprovals(appSnap.docs.map((x) => ({
-                id: x.id,
-                step: String(x.data().step || ""),
-                decision: String(x.data().decision || ""),
-                approvedBy: String(x.data().approvedBy || ""),
-                comments: String(x.data().comments || ""),
-                createdAt: fmtDate(x.data().createdAt),
-            })));
+            const result = await api.getRequestDetail({ requestId: id, orgId: activeOrgId });
+            setRequest(result.request || result);
+            setLineItems(result.lineItems || []);
+            setFiles(result.files || []);
         }
         catch (err) {
             console.error(err);
@@ -109,7 +80,7 @@ export default function RequestDetailPage() {
         finally {
             setLoading(false);
         }
-    }, [id, profile, activeOrgId, navigate]);
+    }, [id, profile, activeOrgId]);
     useEffect(() => { load(); }, [load]);
     const withAction = async (fn) => {
         setActionBusy(true);
@@ -118,7 +89,7 @@ export default function RequestDetailPage() {
         try {
             await fn();
             await load();
-            setActionSuccess("Action completed.");
+            setActionSuccess("Action completed successfully.");
         }
         catch (err) {
             setActionError(err instanceof Error ? err.message : "Action failed.");
@@ -127,124 +98,52 @@ export default function RequestDetailPage() {
             setActionBusy(false);
         }
     };
-    const doSubmitPR = () => withAction(async () => {
-        await expensesApi.submitPurchaseRequest({ tenantId: profile.tenantId, organizationId: activeOrgId, requestId: id });
-    });
-    const doApprovePR = (e) => {
+    const doMarkPaid = (e) => {
         e.preventDefault();
-        withAction(async () => {
-            await expensesApi.applyPurchaseRequestApprovalAction({ tenantId: profile.tenantId, organizationId: activeOrgId, requestId: id, action: prAction, comments });
-            setComments("");
-        });
-    };
-    const doCreateExpenseReport = () => withAction(async () => {
-        await expensesApi.createExpenseReport({ tenantId: profile.tenantId, organizationId: activeOrgId, requestId: id });
-    });
-    const doSubmitExpenseReport = () => withAction(async () => {
-        if (!expenseReport)
+        if (!paymentRef.trim()) {
+            setActionError("Payment reference is required.");
             return;
-        await expensesApi.applyExpenseReportApprovalAction({ tenantId: profile.tenantId, organizationId: activeOrgId, requestId: id, reportId: expenseReport.id, action: "SUBMIT" });
-    });
-    const doERAction = (e) => {
-        e.preventDefault();
-        withAction(async () => {
-            if (!expenseReport)
-                return;
-            await expensesApi.applyExpenseReportApprovalAction({ tenantId: profile.tenantId, organizationId: activeOrgId, requestId: id, reportId: expenseReport.id, action: erAction, comments });
-            setComments("");
-        });
+        }
+        withAction(() => api.markAsPaid({ requestId: id, orgId: activeOrgId, paymentReference: paymentRef }));
     };
-    const doAddLineItem = async (e) => {
+    const doSendToQB = () => {
+        withAction(() => api.sendToQuickBooks({ requestId: id, orgId: activeOrgId }));
+    };
+    const doConfirmQB = (e) => {
         e.preventDefault();
-        if (!expenseReport)
+        withAction(() => api.confirmQBEntry({ requestId: id, orgId: activeOrgId, notes: qbNotes }));
+    };
+    const doOverrideAmount = (e) => {
+        e.preventDefault();
+        if (!overageAmount || parseFloat(overageAmount) <= 0) {
+            setActionError("Valid amount required.");
             return;
-        setLiBusy(true);
-        setLiError("");
-        try {
-            await expensesApi.upsertExpenseLineItem({
-                tenantId: profile.tenantId,
-                organizationId: activeOrgId,
-                requestId: id,
-                reportId: expenseReport.id,
-                vendorId: liVendorId,
-                categoryId: liCategoryId,
-                amount: parseFloat(liAmount),
-                expenseDate: liDate,
-                description: liDescription,
-            });
-            setLiVendorId("");
-            setLiCategoryId("");
-            setLiAmount("");
-            setLiDate("");
-            setLiDescription("");
-            setShowLineItemForm(false);
-            await load();
         }
-        catch (err) {
-            setLiError(err instanceof Error ? err.message : "Failed to add line item.");
-        }
-        finally {
-            setLiBusy(false);
-        }
+        withAction(() => api.applyOverageApproval({ requestId: id, orgId: activeOrgId, approvedAmount: parseFloat(overageAmount) }));
+    };
+    const doAdminApproveReceipts = (e) => {
+        e.preventDefault();
+        withAction(() => api.adminApproveReceiptsReview({ requestId: id, orgId: activeOrgId, notes: adminReceiptsNotes }));
+    };
+    const doSubmitPreApproval = () => {
+        withAction(() => api.submitPreApproval({ requestId: id, orgId: activeOrgId }));
     };
     if (loading) {
-        return _jsx("div", { style: { padding: 24, color: "#9ca3af" }, children: "Loading request..." });
+        return (_jsxs("div", { className: "p-6", children: [_jsx("div", { className: "skeleton h-8 w-64 mb-4" }), _jsx("div", { className: "skeleton h-48 w-full rounded-box" })] }));
     }
     if (!request) {
-        return _jsxs("div", { style: { padding: 24 }, children: ["Request not found. ", _jsx(Link, { to: "/requests", children: "Back" })] });
+        return (_jsxs("div", { className: "p-6", children: [_jsx("div", { className: "alert alert-error", children: "Request not found." }), _jsx(Link, { to: "/", className: "btn btn-sm mt-4", children: "Back to Dashboard" })] }));
     }
     const status = request.status;
-    const isMyRequest = request.requestorId === profile?.uid;
-    const isEditable = (status === "DRAFT" || status === "REQUEST_REVISIONS_NEEDED") && isMyRequest && canRequestExpense;
-    const canSubmitPR = isEditable;
-    const canDoPRApproval = status === "AWAITING_PREAPPROVAL" && canApprove;
-    const canCreateER = status === "APPROVE" && isMyRequest && canRequestExpense;
-    const canAddLineItems = status === "EXPENSE_DRAFT" && isMyRequest && canRequestExpense && !!expenseReport;
-    const canSubmitER = status === "EXPENSE_DRAFT" && isMyRequest && canRequestExpense && !!expenseReport;
-    const canDoERApproval = status === "AWAITING_FINANCE_REVIEW" && canFinanceReview;
-    return (_jsxs("div", { style: { padding: 24, maxWidth: 900 }, children: [_jsxs("div", { style: { marginBottom: 20 }, children: [_jsx("button", { onClick: () => navigate("/requests"), style: { background: "none", border: "none", color: "#6b7280", cursor: "pointer", fontSize: 13, padding: 0, marginBottom: 10 }, children: "\u2190 Back to Requests" }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 14 }, children: [_jsx("h1", { style: { margin: 0, fontSize: 20, fontWeight: 700, color: "#111827" }, children: request.purpose || "(No purpose)" }), _jsx(StatusBadge, { status: status })] }), _jsxs("div", { style: { fontSize: 12, color: "#9ca3af", marginTop: 6 }, children: ["ID: ", id, " \u00B7 Updated ", request.updatedAt] })] }), actionSuccess && _jsx("div", { style: { background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 8, padding: "10px 16px", marginBottom: 16, fontSize: 14, color: "#15803d" }, children: actionSuccess }), actionError && _jsx("div", { style: { background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 16px", marginBottom: 16, fontSize: 14, color: "#dc2626" }, children: actionError }), _jsxs("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }, children: [_jsxs("div", { style: { background: "white", borderRadius: 10, padding: "20px 24px", boxShadow: "0 1px 3px rgba(0,0,0,0.07)", gridColumn: "1 / -1" }, children: [_jsx("h2", { style: { margin: "0 0 16px", fontSize: 14, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em" }, children: "Request Details" }), _jsx("table", { style: { width: "100%", borderCollapse: "collapse" }, children: _jsxs("tbody", { children: [row("Fund", request.fundId), row("Department", request.ministryDepartment), row("Requestor", request.requestorId), row("Approver", request.approverId), row("Estimated", fmtMoney(request.estimatedAmount)), row("Approved", fmtMoney(request.approvedAmount)), row("Actual", fmtMoney(request.actualAmount)), row("Payment Method", request.plannedPaymentMethod), row("Expense Date", request.requestedExpenseDate), row("Description", request.description || "—"), row("Created", request.createdAt)] }) })] }), canSubmitPR && (_jsxs(ActionCard, { title: "Submit for Approval", children: [_jsx("p", { style: { margin: "0 0 14px", fontSize: 13, color: "#6b7280" }, children: "Submit this draft purchase request to your approver." }), _jsx(ActionBtn, { onClick: doSubmitPR, busy: actionBusy, children: "Submit Request" }), _jsx(SecondaryBtn, { onClick: () => navigate(`/requests/new?edit=${id}`), children: "Edit Draft" })] })), canDoPRApproval && (_jsx(ActionCard, { title: "Purchase Request Approval", children: _jsxs("form", { onSubmit: doApprovePR, style: { display: "flex", flexDirection: "column", gap: 10 }, children: [_jsxs("select", { value: prAction, onChange: (e) => setPrAction(e.target.value), style: selStyle, children: [_jsx("option", { value: "APPROVE", children: "Approve" }), _jsx("option", { value: "REJECT", children: "Reject" }), _jsx("option", { value: "REQUEST_REVISIONS", children: "Request Revisions" })] }), _jsx("textarea", { value: comments, onChange: (e) => setComments(e.target.value), placeholder: "Comments (optional)", style: { ...selStyle, height: 60, resize: "vertical" } }), _jsx(ActionBtn, { busy: actionBusy, children: "Apply" })] }) })), canCreateER && (_jsxs(ActionCard, { title: "Expense Report", children: [_jsx("p", { style: { margin: "0 0 14px", fontSize: 13, color: "#6b7280" }, children: "Your purchase request was approved. Create an expense report to record actual expenses." }), _jsx(ActionBtn, { onClick: doCreateExpenseReport, busy: actionBusy, children: "Create Expense Report" })] })), canSubmitER && expenseReport && (_jsxs(ActionCard, { title: "Submit Expense Report", children: [_jsxs("p", { style: { margin: "0 0 14px", fontSize: 13, color: "#6b7280" }, children: ["Report status: ", _jsx(StatusBadge, { status: expenseReport.status })] }), _jsxs("p", { style: { margin: "0 0 14px", fontSize: 13, color: "#6b7280" }, children: [lineItems.length, " line item(s) \u2014 total: ", fmtMoney(lineItems.reduce((s, i) => s + i.amount, 0))] }), _jsx(ActionBtn, { onClick: doSubmitExpenseReport, busy: actionBusy, children: "Submit for Finance Review" })] })), canDoERApproval && expenseReport && (_jsx(ActionCard, { title: "Finance Review", children: _jsxs("form", { onSubmit: doERAction, style: { display: "flex", flexDirection: "column", gap: 10 }, children: [_jsxs("select", { value: erAction, onChange: (e) => setErAction(e.target.value), style: selStyle, children: [_jsx("option", { value: "APPROVE", children: "Approve Expense Report" }), _jsx("option", { value: "REJECT", children: "Reject" }), _jsx("option", { value: "REQUEST_REVISIONS", children: "Request Revisions" }), _jsx("option", { value: "MARK_PAY", children: "Mark as Paid" })] }), _jsx("textarea", { value: comments, onChange: (e) => setComments(e.target.value), placeholder: "Comments (optional)", style: { ...selStyle, height: 60, resize: "vertical" } }), _jsx(ActionBtn, { busy: actionBusy, children: "Apply" })] }) }))] }), (expenseReport || lineItems.length > 0) && (_jsxs("div", { style: { background: "white", borderRadius: 10, padding: "20px 24px", boxShadow: "0 1px 3px rgba(0,0,0,0.07)", marginTop: 16 }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }, children: [_jsx("h2", { style: { margin: 0, fontSize: 14, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em" }, children: "Expense Line Items" }), canAddLineItems && (_jsx("button", { onClick: () => setShowLineItemForm((v) => !v), style: { padding: "5px 12px", background: "#2563eb", color: "white", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }, children: showLineItemForm ? "Cancel" : "+ Add Line Item" }))] }), showLineItemForm && (_jsxs("form", { onSubmit: doAddLineItem, style: { background: "#f9fafb", borderRadius: 8, padding: 16, marginBottom: 16 }, children: [_jsxs("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }, children: [_jsxs("div", { children: [_jsx("label", { style: miniLabel, children: "Vendor ID *" }), _jsx("input", { value: liVendorId, onChange: (e) => setLiVendorId(e.target.value), required: true, style: miniInput })] }), _jsxs("div", { children: [_jsx("label", { style: miniLabel, children: "Category ID *" }), _jsx("input", { value: liCategoryId, onChange: (e) => setLiCategoryId(e.target.value), required: true, style: miniInput })] }), _jsxs("div", { children: [_jsx("label", { style: miniLabel, children: "Amount ($) *" }), _jsx("input", { type: "number", min: "0.01", step: "0.01", value: liAmount, onChange: (e) => setLiAmount(e.target.value), required: true, style: miniInput })] }), _jsxs("div", { children: [_jsx("label", { style: miniLabel, children: "Expense Date *" }), _jsx("input", { type: "date", value: liDate, onChange: (e) => setLiDate(e.target.value), required: true, style: miniInput })] }), _jsxs("div", { style: { gridColumn: "2 / -1" }, children: [_jsx("label", { style: miniLabel, children: "Description" }), _jsx("input", { value: liDescription, onChange: (e) => setLiDescription(e.target.value), style: miniInput })] })] }), liError && _jsx("p", { style: { color: "#dc2626", fontSize: 12, margin: "8px 0 0" }, children: liError }), _jsx("button", { type: "submit", disabled: liBusy, style: { marginTop: 12, padding: "7px 16px", background: "#2563eb", color: "white", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }, children: liBusy ? "Adding..." : "Add Line Item" })] })), lineItems.length === 0 ? (_jsx("div", { style: { color: "#9ca3af", fontSize: 13 }, children: "No line items yet." })) : (_jsxs("table", { style: { width: "100%", borderCollapse: "collapse" }, children: [_jsx("thead", { children: _jsx("tr", { children: ["Vendor", "Category", "Amount", "Date", "Description"].map((h) => (_jsx("th", { style: { textAlign: "left", fontSize: 11, color: "#9ca3af", fontWeight: 600, padding: "6px 10px", borderBottom: "1px solid #f3f4f6", textTransform: "uppercase", letterSpacing: "0.04em" }, children: h }, h))) }) }), _jsxs("tbody", { children: [lineItems.map((li) => (_jsxs("tr", { style: { borderBottom: "1px solid #f9fafb" }, children: [_jsx("td", { style: { padding: "10px", fontSize: 13, color: "#374151" }, children: li.vendorId }), _jsx("td", { style: { padding: "10px", fontSize: 13, color: "#374151" }, children: li.categoryId }), _jsx("td", { style: { padding: "10px", fontSize: 13, color: "#374151" }, children: fmtMoney(li.amount) }), _jsx("td", { style: { padding: "10px", fontSize: 13, color: "#374151" }, children: li.expenseDate }), _jsx("td", { style: { padding: "10px", fontSize: 13, color: "#374151" }, children: li.description || "—" })] }, li.id))), _jsxs("tr", { children: [_jsx("td", { colSpan: 2, style: { padding: "10px", fontSize: 13, fontWeight: 700, color: "#111827" }, children: "Total" }), _jsx("td", { style: { padding: "10px", fontSize: 13, fontWeight: 700, color: "#111827" }, children: fmtMoney(lineItems.reduce((s, i) => s + i.amount, 0)) }), _jsx("td", { colSpan: 2 })] })] })] }))] })), approvals.length > 0 && (_jsxs("div", { style: { background: "white", borderRadius: 10, padding: "20px 24px", boxShadow: "0 1px 3px rgba(0,0,0,0.07)", marginTop: 16 }, children: [_jsx("h2", { style: { margin: "0 0 14px", fontSize: 14, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em" }, children: "Approval History" }), _jsx("div", { style: { display: "flex", flexDirection: "column", gap: 8 }, children: approvals.map((a) => (_jsxs("div", { style: { display: "flex", gap: 12, alignItems: "flex-start", padding: "8px 0", borderBottom: "1px solid #f3f4f6" }, children: [_jsx("div", { style: { width: 8, height: 8, borderRadius: "50%", background: decisionColor(a.decision), marginTop: 5, flexShrink: 0 } }), _jsxs("div", { style: { flex: 1 }, children: [_jsxs("div", { style: { fontSize: 13, color: "#374151", fontWeight: 500 }, children: [_jsx("span", { style: { color: "#9ca3af", marginRight: 6 }, children: a.step }), a.decision] }), a.comments && _jsxs("div", { style: { fontSize: 12, color: "#6b7280", marginTop: 2 }, children: ["\"", a.comments, "\""] }), _jsxs("div", { style: { fontSize: 11, color: "#9ca3af", marginTop: 2 }, children: ["by ", a.approvedBy, " \u00B7 ", a.createdAt] })] })] }, a.id))) })] }))] }));
-}
-// ─── Sub-components ───────────────────────────────────────────────────────────
-function ActionCard({ title, children }) {
-    return (_jsxs("div", { style: { background: "white", borderRadius: 10, padding: "20px 24px", boxShadow: "0 1px 3px rgba(0,0,0,0.07)", borderTop: "3px solid #2563eb" }, children: [_jsx("h2", { style: { margin: "0 0 14px", fontSize: 14, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em" }, children: title }), children] }));
-}
-function ActionBtn({ children, onClick, busy }) {
-    return (_jsx("button", { type: onClick ? "button" : "submit", onClick: onClick, disabled: busy, style: { padding: "9px 20px", background: "#2563eb", color: "white", border: "none", borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.7 : 1, display: "block", width: "100%" }, children: busy ? "Processing..." : children }));
-}
-function SecondaryBtn({ children, onClick }) {
-    return (_jsx("button", { type: "button", onClick: onClick, style: { marginTop: 8, padding: "9px 20px", background: "white", color: "#374151", border: "1px solid #e5e7eb", borderRadius: 7, fontSize: 13, cursor: "pointer", display: "block", width: "100%" }, children: children }));
-}
-const selStyle = {
-    width: "100%",
-    padding: "8px 10px",
-    border: "1px solid #e5e7eb",
-    borderRadius: 7,
-    fontSize: 13,
-    color: "#111827",
-    background: "white",
-    boxSizing: "border-box",
-};
-const miniLabel = {
-    display: "block",
-    fontSize: 11,
-    fontWeight: 600,
-    color: "#6b7280",
-    marginBottom: 4,
-};
-const miniInput = {
-    width: "100%",
-    padding: "7px 10px",
-    border: "1px solid #e5e7eb",
-    borderRadius: 6,
-    fontSize: 13,
-    boxSizing: "border-box",
-};
-function decisionColor(decision) {
-    if (["APPROVE", "SUBMIT", "UPDATED", "CREATED", "ADDED", "MARK_PAY"].includes(decision))
-        return "#10b981";
-    if (["REJECT"].includes(decision))
-        return "#ef4444";
-    if (["REQUEST_REVISIONS"].includes(decision))
-        return "#f97316";
-    return "#9ca3af";
+    const isMyRequest = profile?.uid === request.requestorId;
+    const currentStep = STATUS_TO_STEP[status] || 1;
+    const canEditRequest = isMyRequest && (status === "DRAFT" || status === "NEEDS_EDITS_STEP1");
+    const canSubmitPreApproval = isMyRequest && (status === "DRAFT" || status === "NEEDS_EDITS_STEP1");
+    const canCompleteExpense = isMyRequest && (status === "PREAPPROVED" || status === "DRAFT_EXPENSE" || status === "NEEDS_EDITS_STEP3");
+    const canMarkPaid = isFinancePayor && status === "FINAL_APPROVED";
+    const canSendQB = isQBEntry && status === "PAID";
+    const canConfirmQB = isQBEntry && status === "QB_SENT";
+    const canOverrideAmount = isAdmin && status === "EXCEEDS_APPROVED_AMOUNT";
+    const canAdminApproveReceipts = isAdmin && status === "SUBMITTED_RECEIPT_REVIEW";
+    return (_jsxs("div", { className: "p-6 max-w-4xl mx-auto", children: [_jsx("button", { onClick: () => navigate("/"), className: "btn btn-ghost btn-sm mb-4", children: "\u2190 Back to Dashboard" }), _jsx("div", { className: "flex items-start justify-between mb-4", children: _jsxs("div", { children: [_jsxs("div", { className: "flex items-center gap-3 flex-wrap", children: [_jsx("h1", { className: "text-xl font-bold", children: request.purpose || "(No purpose)" }), _jsx(StatusBadge, { status: status })] }), _jsxs("p", { className: "text-sm text-base-content/60 mt-1", children: ["ID: ", _jsx("span", { className: "font-mono", children: id }), " \u00B7 Updated ", fmtDate(request.updatedAt)] })] }) }), _jsx("div", { className: "card bg-base-100 shadow mb-4", children: _jsx("div", { className: "card-body py-4", children: _jsx("ul", { className: "steps steps-horizontal w-full text-xs", children: STEPS.map(s => (_jsx("li", { className: `step ${s.n <= currentStep ? "step-primary" : ""}`, children: s.label }, s.n))) }) }) }), actionSuccess && (_jsx("div", { className: "alert alert-success mb-4", children: _jsx("span", { children: actionSuccess }) })), actionError && (_jsx("div", { className: "alert alert-error mb-4", children: _jsx("span", { children: actionError }) })), _jsx("div", { className: "card bg-base-100 shadow mb-4", children: _jsxs("div", { className: "card-body", children: [_jsx("h2", { className: "card-title text-sm uppercase tracking-wider text-base-content/60 mb-2", children: "Request Details" }), _jsxs("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3", children: [_jsxs("div", { children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Organization" }), _jsx("div", { className: "text-sm", children: request.orgId })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Ministry / Dept" }), _jsx("div", { className: "text-sm", children: request.ministryDepartment || "—" })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Requestor" }), _jsx("div", { className: "text-sm", children: request.requestorName || request.requestorEmail || request.requestorId || "—" })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Approver" }), _jsx("div", { className: "text-sm", children: request.approverName || request.approverEmail || request.approverId || "—" })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Fund" }), _jsx("div", { className: "text-sm", children: request.fundId || "—" })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Vendor" }), _jsx("div", { className: "text-sm", children: request.vendorName || request.vendorId || "—" })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Category" }), _jsx("div", { className: "text-sm", children: request.category || "—" })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Payment Method" }), _jsx("div", { className: "text-sm", children: request.paymentMethod || "—" })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Estimated Amount" }), _jsx("div", { className: "text-sm font-semibold", children: fmtCurrency(request.estimatedAmount) })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Approved Amount" }), _jsx("div", { className: "text-sm font-semibold", children: request.approvedAmount ? fmtCurrency(request.approvedAmount) : "—" })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Actual Amount" }), _jsx("div", { className: "text-sm font-semibold", children: request.actualAmount ? fmtCurrency(request.actualAmount) : "—" })] }), _jsxs("div", { children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Requested Expense Date" }), _jsx("div", { className: "text-sm", children: request.requestedExpenseDate ? fmtDate(request.requestedExpenseDate) : "—" })] }), _jsxs("div", { className: "md:col-span-2", children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Purpose" }), _jsx("div", { className: "text-sm", children: request.purpose || "—" })] }), _jsxs("div", { className: "md:col-span-2", children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Description" }), _jsx("div", { className: "text-sm whitespace-pre-wrap", children: request.description || "—" })] }), request.preApprovalNotes && (_jsxs("div", { className: "md:col-span-2", children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Pre-Approval Notes" }), _jsx("div", { className: "text-sm", children: request.preApprovalNotes })] })), request.receiptsReviewNotes && (_jsxs("div", { className: "md:col-span-2", children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Receipts Review Notes" }), _jsx("div", { className: "text-sm", children: request.receiptsReviewNotes })] })), request.rejectionReason && (_jsxs("div", { className: "md:col-span-2", children: [_jsx("div", { className: "text-xs text-error uppercase font-semibold", children: "Rejection Reason" }), _jsx("div", { className: "text-sm text-error", children: request.rejectionReason })] })), request.paymentReference && (_jsxs("div", { children: [_jsx("div", { className: "text-xs text-base-content/50 uppercase font-semibold", children: "Payment Reference" }), _jsx("div", { className: "text-sm", children: request.paymentReference })] }))] })] }) }), lineItems.length > 0 && (_jsx("div", { className: "card bg-base-100 shadow mb-4", children: _jsxs("div", { className: "card-body", children: [_jsx("h2", { className: "card-title text-sm uppercase tracking-wider text-base-content/60", children: "Line Items" }), _jsx("div", { className: "overflow-x-auto", children: _jsxs("table", { className: "table table-sm", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Description" }), _jsx("th", { children: "Vendor" }), _jsx("th", { children: "Category" }), _jsx("th", { children: "Date" }), _jsx("th", { children: "Amount" })] }) }), _jsxs("tbody", { children: [lineItems.map((li, i) => (_jsxs("tr", { children: [_jsx("td", { children: li.description || "—" }), _jsx("td", { children: li.vendorName || "—" }), _jsx("td", { children: li.category || "—" }), _jsx("td", { children: li.receiptDate ? fmtDate(li.receiptDate) : "—" }), _jsx("td", { className: "font-medium", children: fmtCurrency(li.amount) })] }, li.id || i))), _jsxs("tr", { className: "font-bold", children: [_jsx("td", { colSpan: 4, children: "Total" }), _jsx("td", { children: fmtCurrency(lineItems.reduce((s, li) => s + (li.amount || 0), 0)) })] })] })] }) })] }) })), files.length > 0 && (_jsx("div", { className: "card bg-base-100 shadow mb-4", children: _jsxs("div", { className: "card-body", children: [_jsx("h2", { className: "card-title text-sm uppercase tracking-wider text-base-content/60", children: "Attached Files" }), _jsx("ul", { className: "space-y-2", children: files.map((f, i) => (_jsxs("li", { className: "flex items-center gap-3", children: [_jsx("svg", { xmlns: "http://www.w3.org/2000/svg", className: "h-4 w-4 text-base-content/50", fill: "none", viewBox: "0 0 24 24", stroke: "currentColor", children: _jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: 2, d: "M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" }) }), _jsx("a", { href: f.fileUrl, target: "_blank", rel: "noreferrer", className: "link link-primary text-sm", children: f.fileName }), _jsx("span", { className: "text-xs text-base-content/40", children: f.mimeType })] }, f.id || i))) })] }) })), (canEditRequest || canSubmitPreApproval || canCompleteExpense) && (_jsx("div", { className: "card bg-base-100 shadow border-t-4 border-primary mb-4", children: _jsxs("div", { className: "card-body", children: [_jsx("h2", { className: "card-title text-sm uppercase tracking-wider", children: "Your Actions" }), _jsxs("div", { className: "flex flex-wrap gap-2", children: [canEditRequest && (_jsx(Link, { to: `/requests/${id}/edit`, className: "btn btn-outline btn-sm", children: "Edit Request" })), canSubmitPreApproval && (_jsx("button", { onClick: doSubmitPreApproval, disabled: actionBusy, className: "btn btn-primary btn-sm", children: actionBusy ? _jsx("span", { className: "loading loading-spinner loading-xs" }) : "Submit for Pre-Approval" })), canCompleteExpense && (_jsx(Link, { to: `/requests/${id}/expense`, className: "btn btn-success btn-sm", children: "Complete Expense Report" }))] })] }) })), canMarkPaid && (_jsx("div", { className: "card bg-base-100 shadow border-t-4 border-success mb-4", children: _jsxs("div", { className: "card-body", children: [_jsx("h2", { className: "card-title text-sm uppercase tracking-wider", children: "Mark as Paid" }), _jsxs("form", { onSubmit: doMarkPaid, className: "flex items-end gap-3", children: [_jsxs("div", { className: "form-control flex-1", children: [_jsx("label", { className: "label py-1", children: _jsx("span", { className: "label-text text-xs", children: "Payment Reference *" }) }), _jsx("input", { className: "input input-bordered input-sm", value: paymentRef, onChange: e => setPaymentRef(e.target.value), placeholder: "Check #, ACH ref, etc.", required: true })] }), _jsx("button", { type: "submit", disabled: actionBusy, className: "btn btn-success btn-sm", children: actionBusy ? _jsx("span", { className: "loading loading-spinner loading-xs" }) : "Mark Paid" })] })] }) })), canSendQB && (_jsx("div", { className: "card bg-base-100 shadow border-t-4 border-info mb-4", children: _jsxs("div", { className: "card-body", children: [_jsx("h2", { className: "card-title text-sm uppercase tracking-wider", children: "Send to QuickBooks" }), _jsx("p", { className: "text-sm text-base-content/60", children: "Export this expense to QuickBooks." }), _jsx("button", { onClick: doSendToQB, disabled: actionBusy, className: "btn btn-info btn-sm w-fit", children: actionBusy ? _jsx("span", { className: "loading loading-spinner loading-xs" }) : "Send to QuickBooks" })] }) })), canConfirmQB && (_jsx("div", { className: "card bg-base-100 shadow border-t-4 border-info mb-4", children: _jsxs("div", { className: "card-body", children: [_jsx("h2", { className: "card-title text-sm uppercase tracking-wider", children: "Confirm QuickBooks Entry" }), _jsxs("form", { onSubmit: doConfirmQB, className: "space-y-3", children: [_jsxs("div", { className: "form-control", children: [_jsx("label", { className: "label py-1", children: _jsx("span", { className: "label-text text-xs", children: "Notes (optional)" }) }), _jsx("textarea", { className: "textarea textarea-bordered textarea-sm", value: qbNotes, onChange: e => setQbNotes(e.target.value), placeholder: "QB entry reference or notes", rows: 2 })] }), _jsx("button", { type: "submit", disabled: actionBusy, className: "btn btn-info btn-sm", children: actionBusy ? _jsx("span", { className: "loading loading-spinner loading-xs" }) : "Confirm QB Entry" })] })] }) })), canOverrideAmount && (_jsx("div", { className: "card bg-base-100 shadow border-t-4 border-warning mb-4", children: _jsxs("div", { className: "card-body", children: [_jsx("h2", { className: "card-title text-sm uppercase tracking-wider", children: "Override Approved Amount" }), _jsxs("p", { className: "text-sm text-base-content/60", children: ["Actual: ", fmtCurrency(request.actualAmount), " / Approved: ", fmtCurrency(request.approvedAmount)] }), _jsxs("form", { onSubmit: doOverrideAmount, className: "flex items-end gap-3", children: [_jsxs("div", { className: "form-control flex-1", children: [_jsx("label", { className: "label py-1", children: _jsx("span", { className: "label-text text-xs", children: "New Approved Amount *" }) }), _jsx("input", { type: "number", step: "0.01", min: "0.01", className: "input input-bordered input-sm", value: overageAmount, onChange: e => setOverageAmount(e.target.value), placeholder: "0.00", required: true })] }), _jsx("button", { type: "submit", disabled: actionBusy, className: "btn btn-warning btn-sm", children: actionBusy ? _jsx("span", { className: "loading loading-spinner loading-xs" }) : "Override Amount" })] })] }) })), canAdminApproveReceipts && (_jsx("div", { className: "card bg-base-100 shadow border-t-4 border-secondary mb-4", children: _jsxs("div", { className: "card-body", children: [_jsx("h2", { className: "card-title text-sm uppercase tracking-wider", children: "Admin: Approve Receipts" }), _jsxs("form", { onSubmit: doAdminApproveReceipts, className: "space-y-3", children: [_jsxs("div", { className: "form-control", children: [_jsx("label", { className: "label py-1", children: _jsx("span", { className: "label-text text-xs", children: "Notes (optional)" }) }), _jsx("textarea", { className: "textarea textarea-bordered textarea-sm", value: adminReceiptsNotes, onChange: e => setAdminReceiptsNotes(e.target.value), placeholder: "Approval notes", rows: 2 })] }), _jsx("button", { type: "submit", disabled: actionBusy, className: "btn btn-secondary btn-sm", children: actionBusy ? _jsx("span", { className: "loading loading-spinner loading-xs" }) : "Approve Receipts" })] })] }) }))] }));
 }

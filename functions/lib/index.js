@@ -21,3 +21,4 @@ __exportStar(require("./modules/budgets"), exports);
 __exportStar(require("./modules/generalLedger"), exports);
 __exportStar(require("./modules/fixedAssets"), exports);
 __exportStar(require("./modules/reports"), exports);
+__exportStar(require("./workflow"), exports);

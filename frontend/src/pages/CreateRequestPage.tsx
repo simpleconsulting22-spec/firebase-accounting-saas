@@ -1,238 +1,503 @@
-import { FormEvent, useEffect, useState } from "react";
-import { collection, query, where, getDocs } from "firebase/firestore";
-import { useNavigate } from "react-router-dom";
-import { db } from "../firebase";
-import { expensesApi } from "../modules/expenses/services";
+import { FormEvent, useCallback, useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { useUserContext } from "../contexts/UserContext";
+import { api } from "../workflow/api";
+import { FUNDS, PAYMENT_METHODS, ORG_NAMES } from "../workflow/constants";
+import { AdminDept, Category, Vendor } from "../workflow/types";
 
-interface Fund {
-  id: string;
-  fundName: string;
-  ministryDepartment: string;
-  annualBudget: number;
+// ─── Vendor Setup Request Modal ───────────────────────────────────────────────
+
+interface VendorSetupModalProps {
+  orgId: string;
+  onClose: () => void;
+  onSuccess: (message: string) => void;
 }
 
-interface Approver {
-  id: string;
-  email: string;
-}
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "9px 12px",
-  border: "1px solid #e5e7eb",
-  borderRadius: 7,
-  fontSize: 14,
-  color: "#111827",
-  background: "white",
-  boxSizing: "border-box",
-};
-
-const labelStyle: React.CSSProperties = {
-  display: "block",
-  fontSize: 12,
-  fontWeight: 600,
-  color: "#374151",
-  marginBottom: 5,
-  textTransform: "uppercase",
-  letterSpacing: "0.04em",
-};
-
-export default function CreateRequestPage() {
-  const navigate = useNavigate();
-  const { profile, activeOrgId } = useUserContext();
-
-  const [funds, setFunds] = useState<Fund[]>([]);
-  const [approvers, setApprovers] = useState<Approver[]>([]);
-
-  const [fundId, setFundId] = useState("");
-  const [ministryDepartment, setMinistryDepartment] = useState("");
-  const [approverId, setApproverId] = useState("");
-  const [estimatedAmount, setEstimatedAmount] = useState("");
-  const [plannedPaymentMethod, setPlannedPaymentMethod] = useState("Check");
-  const [purpose, setPurpose] = useState("");
-  const [description, setDescription] = useState("");
-  const [requestedExpenseDate, setRequestedExpenseDate] = useState("");
+function VendorSetupModal({ orgId, onClose, onSuccess }: VendorSetupModalProps) {
+  const [vendorName, setVendorName] = useState("");
+  const [vendorEmail, setVendorEmail] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    if (!profile || !activeOrgId) return;
-
-    const load = async () => {
-      const [fundsSnap, usersSnap] = await Promise.all([
-        getDocs(query(
-          collection(db, "funds"),
-          where("tenantId", "==", profile.tenantId),
-          where("organizationId", "==", activeOrgId),
-          where("active", "==", true)
-        )),
-        getDocs(query(
-          collection(db, "users"),
-          where("tenantId", "==", profile.tenantId)
-        )),
-      ]);
-
-      setFunds(fundsSnap.docs.map((d) => ({
-        id: d.id,
-        fundName: String(d.data().fundName || ""),
-        ministryDepartment: String(d.data().ministryDepartment || ""),
-        annualBudget: Number(d.data().annualBudget || 0),
-      })));
-
-      setApprovers(
-        usersSnap.docs
-          .filter((d) => {
-            const orgRoles = (d.data().orgRoles || {}) as Record<string, string[]>;
-            const roles = [...(orgRoles[activeOrgId] || []), ...(orgRoles["*"] || [])];
-            return roles.includes("approver") || roles.includes("admin");
-          })
-          .map((d) => ({ id: d.id, email: String(d.data().email || d.id) }))
-      );
-    };
-
-    load().catch(console.error);
-  }, [profile, activeOrgId]);
-
-  const handleFundChange = (id: string) => {
-    setFundId(id);
-    const fund = funds.find((f) => f.id === id);
-    if (fund) setMinistryDepartment(fund.ministryDepartment);
-  };
-
-  const submit = async (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!profile || !activeOrgId) return;
+    if (!vendorName.trim()) { setError("Vendor name is required."); return; }
+    if (!vendorEmail.trim()) { setError("Vendor email is required."); return; }
     setBusy(true);
     setError("");
     try {
-      const result = await expensesApi.createPurchaseRequest({
-        tenantId: profile.tenantId,
-        organizationId: activeOrgId,
-        fundId,
-        ministryDepartment,
-        approverId,
-        estimatedAmount: parseFloat(estimatedAmount),
-        plannedPaymentMethod,
-        purpose,
-        description,
-        requestedExpenseDate,
-      });
-      navigate(`/requests/${result.requestId}`);
+      await api.submitVendorSetupRequest({ orgId, vendorName, vendorEmail, contactName, notes });
+      onSuccess(`Vendor setup request submitted for "${vendorName}". An admin will review it.`);
+      onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create request.");
+      setError(err instanceof Error ? err.message : "Failed to submit vendor request.");
+    } finally {
       setBusy(false);
     }
   };
 
-  if (!profile) return null;
+  return (
+    <div className="modal modal-open">
+      <div className="modal-box max-w-md">
+        <h3 className="font-bold text-lg mb-4">Request New Vendor</h3>
+        {error && <div className="alert alert-error mb-3"><span>{error}</span></div>}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="form-control">
+            <label className="label"><span className="label-text font-semibold">Vendor Name *</span></label>
+            <input
+              className="input input-bordered"
+              value={vendorName}
+              onChange={e => setVendorName(e.target.value)}
+              placeholder="e.g. Office Depot"
+              required
+            />
+          </div>
+          <div className="form-control">
+            <label className="label"><span className="label-text font-semibold">Vendor Email *</span></label>
+            <input
+              type="email"
+              className="input input-bordered"
+              value={vendorEmail}
+              onChange={e => setVendorEmail(e.target.value)}
+              placeholder="vendor@example.com"
+              required
+            />
+          </div>
+          <div className="form-control">
+            <label className="label"><span className="label-text font-semibold">Contact Name</span></label>
+            <input
+              className="input input-bordered"
+              value={contactName}
+              onChange={e => setContactName(e.target.value)}
+              placeholder="Primary contact at vendor"
+            />
+          </div>
+          <div className="form-control">
+            <label className="label"><span className="label-text font-semibold">Description</span></label>
+            <textarea
+              className="textarea textarea-bordered"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="Why is this vendor needed?"
+              rows={3}
+            />
+          </div>
+          <div className="modal-action">
+            <button type="button" onClick={onClose} className="btn btn-ghost" disabled={busy}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? <span className="loading loading-spinner loading-sm" /> : "Submit Request"}
+            </button>
+          </div>
+        </form>
+      </div>
+      <div className="modal-backdrop" onClick={onClose} />
+    </div>
+  );
+}
+
+// ─── Create Request Page ──────────────────────────────────────────────────────
+
+export default function CreateRequestPage() {
+  const navigate = useNavigate();
+  const { id: editId } = useParams<{ id: string }>();
+  const isEdit = !!editId;
+  const { profile, activeOrgId } = useUserContext();
+
+  const [departments, setDepartments] = useState<AdminDept[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loadingData, setLoadingData] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [showVendorModal, setShowVendorModal] = useState(false);
+
+  // Form fields
+  const [orgId, setOrgId] = useState(activeOrgId);
+  const [ministryDepartment, setMinistryDepartment] = useState("");
+  const [approverId, setApproverId] = useState("");
+  const [approverEmail, setApproverEmail] = useState("");
+  const [approverName, setApproverName] = useState("");
+  const [fundId, setFundId] = useState("");
+  const [vendorId, setVendorId] = useState("");
+  const [vendorName, setVendorName] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [estimatedAmount, setEstimatedAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("Check");
+  const [purpose, setPurpose] = useState("");
+  const [description, setDescription] = useState("");
+  const [requestedExpenseDate, setRequestedExpenseDate] = useState("");
+
+  const loadData = useCallback(async () => {
+    if (!activeOrgId) return;
+    setLoadingData(true);
+    try {
+      const [depts, vends, cats] = await Promise.all([
+        api.adminListDepartments({ orgId: activeOrgId }),
+        api.getActiveVendors({ orgId: activeOrgId }),
+        api.adminListCategories({ orgId: activeOrgId }),
+      ]);
+      setDepartments((depts as any)?.departments || []);
+      setVendors((vends as any)?.vendors || []);
+      setCategories((cats as any)?.categories || []);
+
+      if (isEdit && editId) {
+        const result: any = await api.getRequestDetail({ requestId: editId, orgId: activeOrgId });
+        const req = result.request || result;
+        setMinistryDepartment(req.ministryDepartment || "");
+        setApproverId(req.approverId || "");
+        setApproverEmail(req.approverEmail || "");
+        setApproverName(req.approverName || "");
+        setFundId(req.fundId || "");
+        setVendorId(req.vendorId || "");
+        setVendorName(req.vendorName || "");
+        setCategoryId(req.category || "");
+        setEstimatedAmount(req.estimatedAmount ? String(req.estimatedAmount) : "");
+        setPaymentMethod(req.paymentMethod || "Check");
+        setPurpose(req.purpose || "");
+        setDescription(req.description || "");
+        setRequestedExpenseDate(req.requestedExpenseDate || "");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingData(false);
+    }
+  }, [activeOrgId, isEdit, editId]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { setOrgId(activeOrgId); }, [activeOrgId]);
+
+  const handleDeptChange = async (deptName: string) => {
+    setMinistryDepartment(deptName);
+    setApproverId("");
+    setApproverEmail("");
+    setApproverName("");
+    if (!deptName || !activeOrgId) return;
+    // Auto-fill approver from local departments list first for speed
+    const dept = departments.find(d => d.ministryDepartment === deptName);
+    if (dept) {
+      setApproverId(dept.approverId || "");
+      setApproverEmail(dept.approverEmail || "");
+      setApproverName(dept.approverName || "");
+      return;
+    }
+    try {
+      const result: any = await api.getApproverMapping({ orgId: activeOrgId, departmentName: deptName });
+      if (result) {
+        setApproverId(result.approverId || "");
+        setApproverEmail(result.approverEmail || "");
+        setApproverName(result.approverName || "");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleVendorChange = (value: string) => {
+    if (value === "__new__") {
+      setShowVendorModal(true);
+    } else {
+      setVendorId(value);
+      const v = vendors.find(v => v.id === value);
+      setVendorName(v?.vendorName || "");
+    }
+  };
+
+  const buildPayload = () => ({
+    orgId,
+    ministryDepartment,
+    approverId,
+    approverEmail,
+    approverName,
+    fundId,
+    vendorId,
+    vendorName: vendors.find(v => v.id === vendorId)?.vendorName || vendorName,
+    category: categoryId,
+    estimatedAmount: parseFloat(estimatedAmount),
+    paymentMethod,
+    purpose,
+    description,
+    requestedExpenseDate,
+    ...(isEdit ? { requestId: editId } : {}),
+  });
+
+  const handleSaveDraft = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!purpose.trim()) { setError("Purpose is required."); return; }
+    if (!estimatedAmount || parseFloat(estimatedAmount) <= 0) { setError("Valid estimated amount is required."); return; }
+    setBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      const result: any = await api.savePurchaseRequestDraft(buildPayload());
+      const newId = result?.requestId || result?.id;
+      setSuccess(`Draft saved. Request ID: ${newId}`);
+      if (!isEdit && newId) navigate(`/requests/${newId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save draft.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!ministryDepartment) { setError("Ministry department is required."); return; }
+    if (!vendorId) { setError("Vendor is required."); return; }
+    if (!categoryId) { setError("Category is required."); return; }
+    if (!estimatedAmount || parseFloat(estimatedAmount) <= 0) { setError("Valid estimated amount is required."); return; }
+    if (!paymentMethod) { setError("Payment method is required."); return; }
+    if (!requestedExpenseDate) { setError("Expense date is required."); return; }
+    if (!purpose.trim()) { setError("Purpose is required."); return; }
+    setBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      const result: any = await api.submitPreApproval(buildPayload());
+      const newId = result?.requestId || result?.id || editId;
+      setSuccess(`Request submitted for pre-approval! ID: ${newId}`);
+      if (newId) navigate(`/requests/${newId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to submit request.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loadingData) {
+    return (
+      <div className="p-6">
+        <div className="skeleton h-8 w-64 mb-4" />
+        <div className="skeleton h-96 w-full rounded-box" />
+      </div>
+    );
+  }
+
+  const orgOptions = profile?.orgIds || [activeOrgId];
 
   return (
-    <div style={{ padding: 24, maxWidth: 740 }}>
-      <button
-        onClick={() => navigate("/requests")}
-        style={{ background: "none", border: "none", color: "#6b7280", cursor: "pointer", fontSize: 13, padding: 0, marginBottom: 16 }}
-      >
-        ← Back to Requests
+    <div className="p-6 max-w-2xl mx-auto">
+      {showVendorModal && (
+        <VendorSetupModal
+          orgId={orgId}
+          onClose={() => setShowVendorModal(false)}
+          onSuccess={(msg) => setSuccess(msg)}
+        />
+      )}
+
+      <button onClick={() => navigate(-1)} className="btn btn-ghost btn-sm mb-4">
+        ← Back
       </button>
-      <h1 style={{ margin: "0 0 4px", fontSize: 22, fontWeight: 700, color: "#111827" }}>New Purchase Request</h1>
-      <p style={{ margin: "0 0 24px", color: "#6b7280", fontSize: 13 }}>{activeOrgId}</p>
+      <h1 className="text-2xl font-bold mb-1">{isEdit ? "Edit Request" : "New Purchase Request"}</h1>
+      <p className="text-sm text-base-content/60 mb-6">{ORG_NAMES[activeOrgId] || activeOrgId}</p>
 
-      <form onSubmit={submit} style={{ background: "white", borderRadius: 10, padding: "28px 32px", boxShadow: "0 1px 3px rgba(0,0,0,0.07)" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px 24px" }}>
-          {/* Fund */}
-          <div style={{ gridColumn: "1 / -1" }}>
-            <label style={labelStyle}>Fund *</label>
-            {funds.length > 0 ? (
-              <select value={fundId} onChange={(e) => handleFundChange(e.target.value)} required style={inputStyle}>
-                <option value="">Select a fund...</option>
-                {funds.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.fundName} — {f.ministryDepartment}
-                  </option>
+      {success && <div className="alert alert-success mb-4"><span>{success}</span></div>}
+      {error && <div className="alert alert-error mb-4"><span>{error}</span></div>}
+
+      <form className="card bg-base-100 shadow">
+        <div className="card-body space-y-4">
+
+          {/* Org selector (multi-org users) */}
+          {orgOptions.length > 1 && (
+            <div className="form-control">
+              <label className="label"><span className="label-text font-semibold">Organization *</span></label>
+              <select
+                className="select select-bordered"
+                value={orgId}
+                onChange={e => setOrgId(e.target.value)}
+              >
+                {orgOptions.map(id => (
+                  <option key={id} value={id}>{ORG_NAMES[id] || id}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Ministry Department */}
+          <div className="form-control">
+            <label className="label"><span className="label-text font-semibold">Ministry / Department *</span></label>
+            {departments.length > 0 ? (
+              <select
+                className="select select-bordered"
+                value={ministryDepartment}
+                onChange={e => handleDeptChange(e.target.value)}
+                required
+              >
+                <option value="">Select department…</option>
+                {departments.map((d, i) => (
+                  <option key={d.id || i} value={d.ministryDepartment}>{d.ministryDepartment}</option>
                 ))}
               </select>
             ) : (
-              <input value={fundId} onChange={(e) => setFundId(e.target.value)} required style={inputStyle} placeholder="Fund ID" />
+              <input
+                className="input input-bordered"
+                value={ministryDepartment}
+                onChange={e => setMinistryDepartment(e.target.value)}
+                placeholder="e.g. Youth Ministry"
+                required
+              />
             )}
           </div>
 
-          {/* Ministry */}
-          <div>
-            <label style={labelStyle}>Ministry / Department *</label>
-            <input value={ministryDepartment} onChange={(e) => setMinistryDepartment(e.target.value)} required style={inputStyle} placeholder="e.g. Youth Ministry" />
-          </div>
+          {/* Approver info (auto-filled) */}
+          {approverEmail && (
+            <div className="alert alert-info py-2">
+              <span className="text-sm">
+                Approver: <strong>{approverName || approverEmail}</strong> ({approverEmail})
+              </span>
+            </div>
+          )}
 
-          {/* Approver */}
-          <div>
-            <label style={labelStyle}>Approver *</label>
-            {approvers.length > 0 ? (
-              <select value={approverId} onChange={(e) => setApproverId(e.target.value)} required style={inputStyle}>
-                <option value="">Select approver...</option>
-                {approvers.map((a) => (
-                  <option key={a.id} value={a.id}>{a.email}</option>
-                ))}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Fund */}
+            <div className="form-control">
+              <label className="label"><span className="label-text font-semibold">Fund</span></label>
+              <select
+                className="select select-bordered"
+                value={fundId}
+                onChange={e => setFundId(e.target.value)}
+              >
+                <option value="">Select fund…</option>
+                {FUNDS.map(f => <option key={f} value={f}>{f}</option>)}
               </select>
-            ) : (
-              <input value={approverId} onChange={(e) => setApproverId(e.target.value)} required style={inputStyle} placeholder="Approver user ID" />
-            )}
+            </div>
+
+            {/* Category */}
+            <div className="form-control">
+              <label className="label"><span className="label-text font-semibold">Category *</span></label>
+              {categories.length > 0 ? (
+                <select
+                  className="select select-bordered"
+                  value={categoryId}
+                  onChange={e => setCategoryId(e.target.value)}
+                  required
+                >
+                  <option value="">Select category…</option>
+                  {categories.filter(c => c.active !== false).map(c => (
+                    <option key={c.id || c.categoryId} value={c.categoryId}>{c.categoryName}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  className="input input-bordered"
+                  value={categoryId}
+                  onChange={e => setCategoryId(e.target.value)}
+                  placeholder="e.g. Office Supplies"
+                  required
+                />
+              )}
+            </div>
           </div>
 
-          {/* Amount */}
-          <div>
-            <label style={labelStyle}>Estimated Amount ($) *</label>
-            <input type="number" min="0.01" step="0.01" value={estimatedAmount} onChange={(e) => setEstimatedAmount(e.target.value)} required style={inputStyle} placeholder="0.00" />
-          </div>
-
-          {/* Payment method */}
-          <div>
-            <label style={labelStyle}>Payment Method *</label>
-            <select value={plannedPaymentMethod} onChange={(e) => setPlannedPaymentMethod(e.target.value)} required style={inputStyle}>
-              <option>Check</option>
-              <option>Credit Card</option>
-              <option>ACH / Wire</option>
-              <option>Cash</option>
-              <option>Zelle</option>
-              <option>Reimbursement</option>
+          {/* Vendor */}
+          <div className="form-control">
+            <label className="label"><span className="label-text font-semibold">Vendor *</span></label>
+            <select
+              className="select select-bordered"
+              value={vendorId}
+              onChange={e => handleVendorChange(e.target.value)}
+              required
+            >
+              <option value="">Select vendor…</option>
+              {vendors.map(v => (
+                <option key={v.id} value={v.id}>{v.vendorName}</option>
+              ))}
+              <option value="__new__">+ Request New Vendor</option>
             </select>
           </div>
 
-          {/* Date */}
-          <div>
-            <label style={labelStyle}>Requested Expense Date *</label>
-            <input type="date" value={requestedExpenseDate} onChange={(e) => setRequestedExpenseDate(e.target.value)} required style={inputStyle} />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Estimated Amount */}
+            <div className="form-control">
+              <label className="label"><span className="label-text font-semibold">Estimated Amount ($) *</span></label>
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                className="input input-bordered"
+                value={estimatedAmount}
+                onChange={e => setEstimatedAmount(e.target.value)}
+                placeholder="0.00"
+                required
+              />
+            </div>
+
+            {/* Payment Method */}
+            <div className="form-control">
+              <label className="label"><span className="label-text font-semibold">Payment Method *</span></label>
+              <select
+                className="select select-bordered"
+                value={paymentMethod}
+                onChange={e => setPaymentMethod(e.target.value)}
+                required
+              >
+                {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Requested Expense Date */}
+          <div className="form-control">
+            <label className="label"><span className="label-text font-semibold">Requested Expense Date *</span></label>
+            <input
+              type="date"
+              className="input input-bordered"
+              value={requestedExpenseDate}
+              onChange={e => setRequestedExpenseDate(e.target.value)}
+              required
+            />
           </div>
 
           {/* Purpose */}
-          <div style={{ gridColumn: "1 / -1" }}>
-            <label style={labelStyle}>Purpose *</label>
-            <input value={purpose} onChange={(e) => setPurpose(e.target.value)} required style={inputStyle} placeholder="Brief description of the expense" />
+          <div className="form-control">
+            <label className="label"><span className="label-text font-semibold">Purpose *</span></label>
+            <input
+              className="input input-bordered"
+              value={purpose}
+              onChange={e => setPurpose(e.target.value)}
+              placeholder="Brief description of the expense"
+              required
+            />
           </div>
 
           {/* Description */}
-          <div style={{ gridColumn: "1 / -1" }}>
-            <label style={labelStyle}>Description</label>
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} style={{ ...inputStyle, height: 80, resize: "vertical" } as React.CSSProperties} placeholder="Additional details (optional)" />
+          <div className="form-control">
+            <label className="label"><span className="label-text font-semibold">Description</span></label>
+            <textarea
+              className="textarea textarea-bordered"
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="Additional details (optional)"
+              rows={3}
+            />
           </div>
-        </div>
 
-        {error && <p style={{ color: "#dc2626", fontSize: 13, marginTop: 14 }}>{error}</p>}
+          {/* Actions */}
+          <div className="flex flex-wrap gap-3 pt-2">
+            <button
+              type="button"
+              onClick={handleSaveDraft}
+              disabled={busy}
+              className="btn btn-outline"
+            >
+              {busy ? <span className="loading loading-spinner loading-sm" /> : "Save Draft"}
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={busy}
+              className="btn btn-primary"
+            >
+              {busy ? <span className="loading loading-spinner loading-sm" /> : "Submit for Pre-Approval"}
+            </button>
+            <button type="button" onClick={() => navigate(-1)} className="btn btn-ghost">
+              Cancel
+            </button>
+          </div>
 
-        <div style={{ marginTop: 24, display: "flex", gap: 10 }}>
-          <button
-            type="submit"
-            disabled={busy}
-            style={{ padding: "10px 28px", background: "#2563eb", color: "white", border: "none", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.7 : 1 }}
-          >
-            {busy ? "Creating..." : "Create Draft"}
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate("/requests")}
-            style={{ padding: "10px 20px", background: "white", color: "#374151", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 14, cursor: "pointer" }}
-          >
-            Cancel
-          </button>
         </div>
       </form>
     </div>

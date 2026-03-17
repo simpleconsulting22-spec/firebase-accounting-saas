@@ -1,12 +1,20 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
+import { api } from "../workflow/api";
+import { ORG_NAMES } from "../workflow/constants";
 
 export interface UserProfile {
   uid: string;
+  userId: string;
+  name: string;
   email: string;
+  orgId: string;           // primary org from flat schema
+  role: string;            // primary role from flat schema
+  ministryDepartment: string;
+  active: boolean;
   tenantId: string;
-  orgRoles: Record<string, string[]>;
+  orgRoles: Record<string, string[]>;  // legacy / derived
   orgIds: string[];
 }
 
@@ -21,6 +29,14 @@ interface UserContextValue {
   canApprove: boolean;
   canRequestExpense: boolean;
   canFinanceReview: boolean;
+  isFinancePayor: boolean;
+  isReceiptsReviewer: boolean;
+  isQBEntry: boolean;
+  isFinanceNotify: boolean;
+  activeOrgName: string;
+  userRole: string;
+  userName: string;
+  userMinistryDept: string;
 }
 
 const UserContext = createContext<UserContextValue | null>(null);
@@ -35,18 +51,80 @@ export function UserProvider({ uid, email, children }: { uid: string; email: str
     let cancelled = false;
     (async () => {
       try {
-        const snap = await getDoc(doc(db, "users", uid));
+        let snap = await getDoc(doc(db, "users", uid));
         if (cancelled) return;
+
         if (!snap.exists()) {
-          setError("User profile not found. Contact an administrator.");
-          setLoading(false);
+          // First Google login — provision the UID-keyed doc via backend
+          try {
+            await api.resolveGoogleLogin();
+          } catch (err: any) {
+            if (!cancelled) {
+              // Firebase Functions errors: prefer err.message, fall back to err.details
+              const msg =
+                err?.message ||
+                err?.details ||
+                "Access not granted. Please contact your administrator.";
+              setError(msg);
+              setLoading(false);
+            }
+            return;
+          }
+          if (cancelled) return;
+          // Retry now that the doc should exist
+          snap = await getDoc(doc(db, "users", uid));
+          if (!snap.exists()) {
+            if (!cancelled) {
+              setError("Profile setup failed. Contact an administrator.");
+              setLoading(false);
+            }
+            return;
+          }
+        }
+
+        const data = snap.data()!;
+
+        if (data.active === false) {
+          if (!cancelled) {
+            setError("Your account has been deactivated. Contact your administrator.");
+            setLoading(false);
+          }
           return;
         }
-        const data = snap.data() as { tenantId: string; orgRoles: Record<string, string[]> };
-        const orgRoles = data.orgRoles || {};
-        const orgIds = Object.keys(orgRoles).filter((k) => k !== "*");
-        setProfile({ uid, email, tenantId: data.tenantId, orgRoles, orgIds });
-        setActiveOrgId(orgIds[0] || "");
+
+        let orgId = "";
+        let role = "";
+        let orgRoles: Record<string, string[]> = {};
+        let orgIds: string[] = [];
+
+        if (data.orgId && data.role) {
+          // New flat schema
+          orgId = data.orgId;
+          role = data.role;
+          orgRoles = { [data.orgId]: [data.role] };
+          orgIds = [data.orgId];
+        } else if (data.orgRoles) {
+          // Legacy orgRoles map
+          orgRoles = data.orgRoles || {};
+          orgIds = Object.keys(orgRoles).filter(k => k !== "*");
+          orgId = orgIds[0] || "";
+          role = (orgRoles[orgId] || [])[0] || "";
+        }
+
+        setProfile({
+          uid,
+          userId: data.userId || uid,
+          name: data.name || data.displayName || "",
+          email: data.email || email,
+          orgId,
+          role,
+          ministryDepartment: data.ministryDepartment || "",
+          active: data.active !== false,  // default true
+          tenantId: data.tenantId || "tenant_main",
+          orgRoles,
+          orgIds,
+        });
+        setActiveOrgId(orgId);
       } catch (err) {
         if (!cancelled) setError("Failed to load user profile.");
       } finally {
@@ -66,16 +144,30 @@ export function UserProvider({ uid, email, children }: { uid: string; email: str
 
   const hasRole = (role: string): boolean => {
     const roles = getRoles();
-    return roles.includes(role) || roles.includes("admin");
+    return roles.includes(role) || roles.includes("ADMIN") || roles.includes("admin");
   };
 
-  const isAdmin = hasRole("admin");
+  const isAdmin = hasRole("ADMIN") || hasRole("admin");
   const canApprove = isAdmin || hasRole("approver");
   const canRequestExpense = isAdmin || hasRole("requestor");
-  const canFinanceReview = isAdmin || hasRole("finance");
+  const canFinanceReview = isAdmin || hasRole("finance") || hasRole("FINANCE_RECEIPTS_REVIEWER") || hasRole("FINANCE_PAYOR") || hasRole("FINANCE_QB_ENTRY") || hasRole("FINANCE_NOTIFY");
+  const isFinancePayor = isAdmin || hasRole("FINANCE_PAYOR");
+  const isReceiptsReviewer = isAdmin || hasRole("FINANCE_RECEIPTS_REVIEWER");
+  const isQBEntry = isAdmin || hasRole("FINANCE_QB_ENTRY");
+  const isFinanceNotify = isAdmin || hasRole("FINANCE_NOTIFY");
+  const activeOrgName = ORG_NAMES[activeOrgId] || activeOrgId;
+
+  const userRole = profile?.role || "";
+  const userName = profile?.name || "";
+  const userMinistryDept = profile?.ministryDepartment || "";
 
   return (
-    <UserContext.Provider value={{ profile, loading, error, activeOrgId, setActiveOrgId, hasRole, isAdmin, canApprove, canRequestExpense, canFinanceReview }}>
+    <UserContext.Provider value={{
+      profile, loading, error, activeOrgId, setActiveOrgId, hasRole,
+      isAdmin, canApprove, canRequestExpense, canFinanceReview,
+      isFinancePayor, isReceiptsReviewer, isQBEntry, isFinanceNotify, activeOrgName,
+      userRole, userName, userMinistryDept,
+    }}>
       {children}
     </UserContext.Provider>
   );

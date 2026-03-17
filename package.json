@@ -1,5 +1,18 @@
 {
+  "scripts": {
+    "seed": "FIRESTORE_EMULATOR_HOST=localhost:8080 npx ts-node --project tsconfig.seed.json scripts/seed.ts",
+    "emulators": "firebase emulators:start --project demo-project --import ./emulator-data --export-on-exit ./emulator-data",
+    "save": "firebase emulators:export ./emulator-data --project demo-project --force",
+    "dev": "npm run emulators & (sleep 5 && cd frontend && npm run dev -- --port 5173 --host) & (sleep 15 && while true; do sleep 120 && firebase emulators:export ./emulator-data --project demo-project --force; done)",
+    "start": "cd functions && npm run build && cd .. && npm run emulators & (sleep 8 && cd frontend && npm run dev -- --port 5173 --host)"
+  },
   "dependencies": {
-    "@anthropic-ai/claude-code": "^2.1.76"
+    "@anthropic-ai/claude-code": "^2.1.76",
+    "firebase-admin": "^13.7.0",
+    "firebase-tools": "^15.10.0"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   }
 }

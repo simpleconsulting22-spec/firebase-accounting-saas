@@ -5,3 +5,4 @@ export * from "./modules/budgets";
 export * from "./modules/generalLedger";
 export * from "./modules/fixedAssets";
 export * from "./modules/reports";
+export * from "./workflow";
